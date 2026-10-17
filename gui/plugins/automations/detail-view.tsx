@@ -600,7 +600,7 @@ export function AgentAutomationDefinition({
       <Textarea
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
-        aria-label="Automation prompt"
+        aria-label="Loop prompt"
         disabled={pending}
         className="min-h-28 resize-none border-0 bg-transparent px-4 pb-1 pr-14 pt-3 text-sm leading-relaxed shadow-none focus-visible:ring-0"
       />
@@ -742,7 +742,7 @@ export function AutomationDetailView({
   const lifecycleLocked =
     requiresPrompt || !oneShotLifecycleAllowsToggle(oneShotLifecycle);
   const lifecycleDisabledReason = requiresPrompt
-    ? "Add a prompt before changing this automation."
+    ? "Add a prompt before changing this loop."
     : lifecycleLocked
       ? oneShotLifecycle === "expired"
         ? "Missed its run time. Edit to reschedule."
@@ -789,14 +789,14 @@ export function AutomationDetailView({
           disabledReason={lifecycleDisabledReason}
           label={
             requiresPrompt
-              ? "Add a prompt before changing this automation"
+              ? "Add a prompt before changing this loop"
               : oneShotLifecycle === "expired"
-                ? "Expired automation; edit to reschedule"
+                ? "Expired loop; edit to reschedule"
                 : lifecycleLocked
-                  ? `${formatScheduleStatusLabel(automation)} automation`
+                  ? `${formatScheduleStatusLabel(automation)} loop`
                   : automation.enabled
-                    ? "Pause automation"
-                    : "Resume automation"
+                    ? "Pause loop"
+                    : "Resume loop"
           }
           onCheckedChange={onToggle}
         />
@@ -811,7 +811,7 @@ export function AutomationDetailView({
               icon: "Play",
               disabled: requiresPrompt,
               disabledReason: requiresPrompt
-                ? "Add a prompt before running this automation."
+                ? "Add a prompt before running this loop."
                 : undefined,
               onSelect: onRunNow,
             },

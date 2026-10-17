@@ -144,19 +144,21 @@ bb plugin config push-notifications set expoPushUrl <url>
 
 The Expo request supports `HTTPS_PROXY` and `NO_PROXY`.
 
-## Point the desktop app at another bb
+## Open another of your Macs
 
-The desktop app's Server menu lists "This Mac", every bb connect server on the
-account, and a custom URL. When you select a remote server, the app stops
-starting a bb server on this Mac. It starts one again only when you select
-"This Mac".
+Settings → Machines → **Your computers** lists every Mac signed in to the same
+Cloudroom account, through Cloudroom Connect on cloudroom.run. Choose Open to
+use that Mac's projects and threads in this window. Window → Server shows the
+same list, plus a custom URL. When you pick another Mac, the app stops starting
+a server on this Mac.
 
-To reach bb connect without a local server, the app enrolls itself once as a
-connect machine. That step needs the local server, so the first switch to a
-remote server still starts it. The app keeps its own credential, encrypted with
-the OS keychain, and never holds the server's pairing secret. The app appears in
-the getbb.app dashboard machine list, where you can revoke it. After a revoke,
-the app drops the credential and asks the local server again.
+The app remembers the pick and opens that Mac on every launch. If it doesn't
+answer within 5 seconds, the app opens this Mac instead and shows a banner. When
+the other Mac comes back online, the banner offers Switch.
+
+The app keeps this Mac's Connect key, encrypted with the OS keychain, so it can
+open another Mac without starting its own server. It gets the key from the local
+server once, and again if the relay rejects it.
 
 A remote server has no realtime link for keybindings and theme. The app re-reads
 them when it starts, when it becomes active, and every five minutes.

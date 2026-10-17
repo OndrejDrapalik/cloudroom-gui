@@ -216,7 +216,24 @@ export const migrations = [
    CREATE UNIQUE INDEX IF NOT EXISTS automation_runs_single_flight_idx
      ON automation_runs(automation_id)
      WHERE status = 'running';`,
+  `CREATE TABLE IF NOT EXISTS automation_review_threads (
+     thread_id TEXT PRIMARY KEY,
+     automation_id TEXT,
+     run_id TEXT,
+     loop_name TEXT NOT NULL,
+     created_at INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS automation_review_threads_created_idx
+     ON automation_review_threads(created_at);
+   CREATE TABLE IF NOT EXISTS automation_reviews (
+     item_id TEXT PRIMARY KEY,
+     reviewed_at INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS automation_runs_started_idx
+     ON automation_runs(started_at);`,
 ];
+
+export const REVIEW_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 function automationRetryDelayMs(consecutiveFailures: number): number {
   const exponent = Math.max(0, consecutiveFailures - 1);
@@ -593,6 +610,9 @@ export function deleteAutomation(
   db.prepare(`DELETE FROM automation_thread_marks WHERE automation_id = ?`).run(
     args.automationId,
   );
+  db.prepare(
+    `DELETE FROM automation_review_threads WHERE automation_id = ?`,
+  ).run(args.automationId);
   db.prepare(`DELETE FROM automations WHERE id = ? AND project_id = ?`).run(
     args.automationId,
     args.projectId,
@@ -754,7 +774,7 @@ function recordAutomationFailure(
       ? args.now + automationRetryDelayMs(consecutiveFailures)
       : null;
   const lastError = paused
-    ? `${args.error} (automation paused after ${consecutiveFailures} consecutive failures)`
+    ? `${args.error} (loop paused after ${consecutiveFailures} consecutive failures)`
     : args.error;
   db.prepare(
     `UPDATE automations SET
@@ -1047,4 +1067,136 @@ export function disableAutomationsForDeletedThread(
     )
     .all(args)
     .map(requiredAutomationRow);
+}
+
+export interface ReviewRunRow extends AutomationRunRow {
+  name: string;
+  projectId: string;
+  targetThreadId: string | null;
+}
+
+export function listReviewRuns(
+  db: Db,
+  args: { since: number; limit: number },
+): ReviewRunRow[] {
+  return db
+    .prepare(
+      `SELECT r.id, r.automation_id AS automationId, r.run_mode AS runMode,
+         r.thread_id AS threadId, r.status, r.trigger, r.skip_reason AS skipReason,
+         r.error, r.output, r.exit_code AS exitCode,
+         r.idempotency_key AS idempotencyKey, r.scheduled_for AS scheduledFor,
+         r.started_at AS startedAt, r.finished_at AS finishedAt,
+         a.name, a.project_id AS projectId, a.target_thread_id AS targetThreadId
+       FROM automation_runs r JOIN automations a ON a.id = r.automation_id
+       WHERE r.started_at >= ? AND r.status != 'skipped'
+       ORDER BY r.started_at DESC, r.id DESC
+       LIMIT ?`,
+    )
+    .all(args.since, args.limit) as ReviewRunRow[];
+}
+
+export interface ReviewThreadRow {
+  threadId: string;
+  automationId: string | null;
+  runId: string | null;
+  loopName: string;
+  createdAt: number;
+}
+
+export function listReviewThreads(
+  db: Db,
+  args: { since: number; limit: number },
+): ReviewThreadRow[] {
+  return db
+    .prepare(
+      `SELECT thread_id AS threadId, automation_id AS automationId,
+         run_id AS runId, loop_name AS loopName, created_at AS createdAt
+       FROM automation_review_threads
+       WHERE created_at >= ?
+       ORDER BY created_at DESC
+       LIMIT ?`,
+    )
+    .all(args.since, args.limit) as ReviewThreadRow[];
+}
+
+export function isReviewThread(db: Db, threadId: string): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM automation_review_threads WHERE thread_id = ?
+         UNION ALL SELECT 1 FROM automation_runs WHERE thread_id = ?
+         LIMIT 1`,
+      )
+      .get(threadId, threadId) !== undefined
+  );
+}
+
+export function addReviewThread(db: Db, row: ReviewThreadRow): boolean {
+  db.prepare(`DELETE FROM automation_review_threads WHERE created_at < ?`).run(
+    row.createdAt - REVIEW_RETENTION_MS,
+  );
+  return (
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO automation_review_threads (
+           thread_id, automation_id, run_id, loop_name, created_at
+         ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(
+        row.threadId,
+        row.automationId,
+        row.runId,
+        row.loopName,
+        row.createdAt,
+      ).changes === 1
+  );
+}
+
+export function linkRunThread(
+  db: Db,
+  args: { runId: string; threadId: string; now: number },
+): AutomationRow | null {
+  const run = getAutomationRun(db, args.runId);
+  if (!run || run.status !== "running" || run.threadId === args.threadId) {
+    return null;
+  }
+  const automation = getAutomation(db, run.automationId);
+  if (!automation) return null;
+  addReviewThread(db, {
+    threadId: args.threadId,
+    automationId: automation.id,
+    runId: run.id,
+    loopName: automation.name,
+    createdAt: args.now,
+  });
+  return automation;
+}
+
+export function listReviewedAt(db: Db): Map<string, number> {
+  const rows = db
+    .prepare(
+      `SELECT item_id AS itemId, reviewed_at AS reviewedAt FROM automation_reviews`,
+    )
+    .all() as { itemId: string; reviewedAt: number }[];
+  return new Map(rows.map((row) => [row.itemId, row.reviewedAt]));
+}
+
+export function setReviewed(
+  db: Db,
+  args: { itemIds: readonly string[]; reviewed: boolean; now: number },
+): void {
+  db.transaction(() => {
+    db.prepare(`DELETE FROM automation_reviews WHERE reviewed_at < ?`).run(
+      args.now - REVIEW_RETENTION_MS,
+    );
+    const statement = args.reviewed
+      ? db.prepare(
+          `INSERT OR REPLACE INTO automation_reviews (item_id, reviewed_at) VALUES (?, ?)`,
+        )
+      : db.prepare(`DELETE FROM automation_reviews WHERE item_id = ?`);
+    for (const itemId of args.itemIds) {
+      if (args.reviewed) statement.run(itemId, args.now);
+      else statement.run(itemId);
+    }
+  })();
 }

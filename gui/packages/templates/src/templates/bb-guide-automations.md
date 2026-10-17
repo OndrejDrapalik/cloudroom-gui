@@ -1,11 +1,12 @@
 ---
 kind: instruction
-title: Cloudroom Guide Automations
-summary: Command reference for scheduled agent and script work.
-intent: Help agents create, edit, inspect, and run automations through the CLI.
+title: Cloudroom Guide Loops
+summary: Command reference for scheduled agent and script work (Loops).
+intent: Help agents create, edit, inspect, run, and review loops through the CLI.
 ---
-Automations schedule recurring or one-shot work. Agent automations run a prompt
-in a thread; script automations run stored code without model usage.
+Loops (formerly Automations) schedule recurring or one-shot work. Agent loops
+run a prompt in a thread; script loops run stored code without model usage.
+`room-cli loop` is the same command as `room-cli automation`.
 
   room-cli automation list --project <id>
   room-cli automation show <automationId> --project <id>
@@ -15,6 +16,8 @@ in a thread; script automations run stored code without model usage.
   room-cli automation run <automationId> --project <id>
   room-cli automation runs <automationId> --project <id> [--limit <count>]
   room-cli automation delete <automationId> --project <id> --yes
+  room-cli automation review [--all]        What loops did in the last 7 days
+  room-cli automation review mark <itemId...> [--undo]
 
 Schedules:
 
@@ -63,7 +66,7 @@ invalid-data variant contains only its identity fields and `problem`. Use
 
 `list` and `show` keep damaged stored records visible as `Prompt required` or
 `Invalid data` instead of failing the whole read. Opening a `Prompt required`
-record in the Automations panel takes you through the standard editor, where
+record in the Loops panel takes you through the standard editor, where
 you can add the prompt while reviewing its other settings. The same repair is
 available through the CLI:
 

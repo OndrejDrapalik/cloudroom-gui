@@ -33,5 +33,5 @@ export function buildAutomationEditThreadPrompt({
   projectId: string;
   automationId: string;
 }): string {
-  return `Edit the Cloudroom automation ${quoteResourceName(name)} (ID ${automationId}) in project ${projectId}. I want to `;
+  return `Edit the Cloudroom loop ${quoteResourceName(name)} (ID ${automationId}) in project ${projectId}. I want to `;
 }

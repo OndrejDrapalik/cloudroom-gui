@@ -3,6 +3,7 @@ export const BB_DESKTOP_OPEN_LINK_CHANNEL = "bb-desktop:open-link";
 export const BB_DESKTOP_APP_COMMAND_CHANNEL = "bb-desktop:app-command";
 export const BB_DESKTOP_ADD_IMAGE_TO_CHAT_CHANNEL =
   "bb-desktop:add-image-to-chat";
+export const BB_DESKTOP_OPEN_COMPUTER_CHANNEL = "bb-desktop:open-computer";
 export const BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL =
   "bb-desktop:open-server-daemon-logs";
 export const BB_DESKTOP_GET_WINDOW_STATE_CHANNEL =

@@ -15,35 +15,6 @@ export interface SignedIn {
 
 export class SignInAgainError extends Error {}
 
-export async function postToken(
-  url: string,
-  format: "json" | "form",
-  body: Record<string, string>,
-): Promise<unknown> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type":
-        format === "json"
-          ? "application/json"
-          : "application/x-www-form-urlencoded",
-    },
-    body:
-      format === "json"
-        ? JSON.stringify(body)
-        : new URLSearchParams(body).toString(),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (response.status === 400 || response.status === 401)
-    throw new SignInAgainError(
-      "The provider rejected this login. Sign in again.",
-    );
-  if (!response.ok)
-    throw new Error(`Token request failed (HTTP ${response.status}).`);
-  return response.json();
-}
-
 export function readReset(
   value: string | number | null | undefined,
 ): number | null {

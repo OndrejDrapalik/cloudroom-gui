@@ -2,6 +2,7 @@ import { z } from "zod";
 import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import {
   ConnectListError,
+  connectCredentialSchema,
   type DesktopSession,
   type ListAccountServersResult,
 } from "@cloudroom/connect-client";
@@ -134,6 +135,8 @@ export const connectRpcContract = defineRpcContract({
     output: listAccountServersResultSchema,
   },
   createDesktopSession: { input: z.null(), output: desktopSessionSchema },
+  /** This Mac's cloudroom.run key. The desktop app keeps it to list and open your other Macs. */
+  relayCredential: { input: z.null(), output: connectCredentialSchema.nullable() },
   mobilePairing: { input: z.null(), output: mobilePairingSchema },
   /** Read the "Tell agents about remote access" setting, or set it when `enabled` is given. */
   remoteInstructions: { input: remoteInstructionsInputSchema, output: remoteInstructionsSchema },
@@ -226,6 +229,9 @@ export function createRpcHandlers(args: {
         () => legacy.createDesktopSession(),
         (error) => error instanceof ConnectListError,
       );
+    },
+    async relayCredential() {
+      return relay.getCredential();
     },
     async mobilePairing() {
       return { enabled: await mobilePairing.enabled() };

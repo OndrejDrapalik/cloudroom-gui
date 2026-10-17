@@ -37,7 +37,6 @@ import {
   buildExecutionOptions,
   buildThreadStartCommand,
 } from "./thread-commands.js";
-import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import { requireReadyThreadEnvironment } from "./thread-turn-dispatch.js";
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import {
@@ -421,12 +420,11 @@ export async function editThreadMessage(
   }
   const initialThread = getThread(deps.db, args.thread.id);
   if (!initialThread) conflict("Thread not found");
-  const senderThreadId = resolveMessageSenderThreadId(deps, {
+  // Rejects an unknown agent caller before any history is rewritten.
+  resolveMessageSenderThreadId(deps, {
     senderThreadId: args.payload.senderThreadId,
     targetThread: initialThread,
   });
-  const initiator = senderThreadId === null ? "user" : "agent";
-
   const initialTarget = resolveEditableTurn(
     deps.db,
     initialThread,
@@ -462,9 +460,7 @@ export async function editThreadMessage(
       input: [],
       requestId: createClientTurnRequestId(),
       execution,
-      permissionEscalation: resolvePermissionEscalation({
-        initiator,
-      }),
+      permissionEscalation: "ask",
       environment: readyEnvironment,
       projectId: editableThread.projectId,
       providerId: editableThread.providerId,

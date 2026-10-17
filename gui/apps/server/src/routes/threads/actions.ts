@@ -404,7 +404,7 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
       environment,
       execution,
       input: [],
-      permissionEscalation: "deny",
+      permissionEscalation: "ask",
       target: { mode: "auto", expectedTurnId: null },
       thread,
     });
@@ -454,7 +454,7 @@ export function registerThreadActionRoutes(app: Hono, deps: AppDeps): void {
       environment,
       execution,
       input: [],
-      permissionEscalation: "deny",
+      permissionEscalation: "ask",
       target: { mode: "auto", expectedTurnId: null },
       thread,
     });

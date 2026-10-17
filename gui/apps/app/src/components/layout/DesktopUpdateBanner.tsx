@@ -17,7 +17,7 @@ const REMIND_AFTER_MS = 8 * 60 * 60 * 1000;
 const HEIGHT_VAR = "--bb-update-banner-height";
 
 // Window-pinned controls (e.g. the home right-panel toggle) read this to sit below the banner.
-function publishBannerHeight(element: HTMLDivElement | null) {
+export function publishBannerHeight(element: HTMLDivElement | null) {
   if (!element) return;
   const style = document.documentElement.style;
   style.setProperty(HEIGHT_VAR, `${element.offsetHeight}px`);

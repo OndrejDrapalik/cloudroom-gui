@@ -18,6 +18,7 @@ import type {
   PermissionMode,
   ReasoningLevel,
   ResolvedCreateAutomationInput,
+  ReviewItem,
   ServiceTier,
   UpdateAutomationInput,
 } from "./rpc-types.js";
@@ -447,7 +448,7 @@ async function buildExecution(
       args.flags.has("env-json"))
   ) {
     throw new Error(
-      "Agent automations do not accept --interpreter, --timeout, or --env-json.",
+      "Agent loops do not accept --interpreter, --timeout, or --env-json.",
     );
   }
   if (!hasAgent && !hasScript) {
@@ -460,7 +461,7 @@ async function buildExecution(
     const model = flag(args, "model");
     if (!provider || !model) {
       throw new Error(
-        "Agent automations require --provider and --model alongside --prompt.",
+        "Agent loops require --provider and --model alongside --prompt.",
       );
     }
     validateAgentTargetOptions(args);
@@ -511,7 +512,7 @@ async function buildExecution(
     args.flags.has("new-environment") ||
     args.flags.has("base-branch")
   ) {
-    throw new Error("Script automations do not accept agent execution flags.");
+    throw new Error("Script loops do not accept agent execution flags.");
   }
   if (script !== undefined && scriptFile !== undefined) {
     throw new Error("Provide exactly one of --script or --script-file.");
@@ -771,7 +772,7 @@ function printScriptFileSnapshotNote(
   return [
     `Copied ${source.path}${source.hostId !== undefined ? ` (host ${source.hostId})` : ""}`,
     `    to ${automation.execution.storedScriptPath}`,
-    "The automation runs this stored copy, a snapshot of the source file.",
+    "The loop runs this stored copy, a snapshot of the source file.",
     "Edits to the source file do not apply until you run:",
     `  ${refreshScriptFileCommand(automation, source)}`,
     "",
@@ -859,7 +860,7 @@ function printRunTable(runs: AutomationRunResponse[]): string {
 }
 
 function helpText(): string {
-  return `Automation commands
+  return `Loop commands (room-cli loop is the same command)
 
 room-cli automation list --project <id>
 room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] | --script <inline> | --script-file <path> [--host <name-or-id>])
@@ -870,13 +871,15 @@ room-cli automation resume <automationId> --project <id>
 room-cli automation run <automationId> --project <id> [--idempotency-key <key>]
 room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>]
 room-cli automation delete <automationId> --project <id> --yes
+room-cli automation review [--all]                List what loops did in the last 7 days (threads they started, script output, failures)
+room-cli automation review mark <itemId...> [--undo]
 
-Cloud automations run on Cloudroom's servers, even while this Mac is off: every minute with a script, else at most every
+Cloud loops run on Cloudroom's servers, even while this Mac is off: every minute with a script, else at most every
 15 minutes. A --cron run starts a fresh Cloud thread in its own sandbox from that thread's project and agent;
 --same-thread re-prompts the thread instead.
 A one-time --at/--in run re-prompts the thread; --new-thread gives it a fresh one.
-A fresh-thread automation saves the thread's settings, so it keeps running after that thread is archived.
-A --script/--script-file runs first (60 s), in the automation's own sandbox with fresh threads, else in the thread's:
+A fresh-thread loop saves the thread's settings, so it keeps running after that thread is archived.
+A --script/--script-file runs first (60 s), in the loop's own sandbox with fresh threads, else in the thread's:
 no output skips the run, output is added to the prompt.
 room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>) [--new-thread | --same-thread] [--script <inline> | --script-file <path>]
 room-cli automation list --cloud [--thread <cloudThreadId>]
@@ -925,26 +928,26 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
   const id = args.positionals[0];
   const one = async (request: Parameters<Cloud["automations"]>[0], verb: string) => {
     const { automation } = await cloud.automations(request);
-    if (!automation) throw new Error("The website returned no automation.");
-    return { exitCode: 0, stdout: optionalJson(args, automation) ?? `Cloud automation ${verb}\n${printCloudAutomation(automation)}` };
+    if (!automation) throw new Error("The website returned no loop.");
+    return { exitCode: 0, stdout: optionalJson(args, automation) ?? `Cloud loop ${verb}\n${printCloudAutomation(automation)}` };
   };
   const requireId = () => {
-    if (!id || !CLOUD_ID.test(id)) throw new Error("Missing cloud automation ID.");
+    if (!id || !CLOUD_ID.test(id)) throw new Error("Missing cloud loop ID.");
     return id;
   };
   if (args.command === "list") {
     const { automations = [] } = await cloud.automations({ action: "list", ...(flag(args, "thread") ? { thread: flag(args, "thread")! } : {}) });
-    return { exitCode: 0, stdout: optionalJson(args, automations) ?? (automations.length ? automations.map(printCloudAutomation).join("") : "No cloud automations found\n") };
+    return { exitCode: 0, stdout: optionalJson(args, automations) ?? (automations.length ? automations.map(printCloudAutomation).join("") : "No cloud loops found\n") };
   }
   if (args.command === "show") {
     const { automations = [] } = await cloud.automations({ action: "list" });
     const found = automations.find((a) => a.id === requireId());
-    if (!found) throw new Error(`Cloud automation ${id} not found.`);
+    if (!found) throw new Error(`Cloud loop ${id} not found.`);
     return { exitCode: 0, stdout: optionalJson(args, found) ?? printCloudAutomation(found) };
   }
   if (args.command === "create") {
     if (["provider", "model", "environment"].some((name) => args.flags.has(name))) {
-      throw new Error("Cloud automations use their Cloud thread's harness and model. Drop --provider, --model, and --environment.");
+      throw new Error("Cloud loops use their Cloud thread's harness and model. Drop --provider, --model, and --environment.");
     }
     const thread = flag(args, "thread") ?? ctx.threadId;
     if (!thread) throw new Error("Missing required option --thread <cloudThreadId>.");
@@ -962,10 +965,51 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
   if (args.command === "delete") {
     if (!boolFlag(args, "yes")) throw new Error("Deletion requires --yes when run through the plugin CLI.");
     await cloud.automations({ action: "delete", id: requireId() });
-    return { exitCode: 0, stdout: optionalJson(args, { ok: true, id }) ?? `Cloud automation ${id} deleted\n` };
+    return { exitCode: 0, stdout: optionalJson(args, { ok: true, id }) ?? `Cloud loop ${id} deleted\n` };
   }
   if (args.command === "runs") throw new Error("Each cloud run is a message in its Cloud thread. Read the thread instead.");
-  throw new Error(`Unknown automation command: ${args.command}`);
+  throw new Error(`Unknown loop command: ${args.command}`);
+}
+
+function printReview(items: readonly ReviewItem[]): string {
+  if (items.length === 0) return "Nothing to review\n";
+  return table(
+    ["When", "Status", "Loop", "Title", "Item"],
+    items.map((item) => [
+      formatTimestamp(item.at),
+      item.reviewedAt === null ? item.status : `${item.status} (reviewed)`,
+      `${item.loop.name}${item.loop.cloud ? " (cloud)" : ""}`,
+      item.title.length > 60 ? `${item.title.slice(0, 59)}…` : item.title,
+      item.id,
+    ]),
+  );
+}
+
+async function runReviewCommand(
+  service: AutomationService,
+  args: ParsedArgs,
+): Promise<PluginCliResult> {
+  const [subcommand, ...itemIds] = args.positionals;
+  if (subcommand === "mark") {
+    if (itemIds.length === 0) throw new Error("Give one or more review item IDs.");
+    const reviewed = !boolFlag(args, "undo");
+    service.markReviewed({ itemIds, reviewed });
+    return {
+      exitCode: 0,
+      stdout:
+        optionalJson(args, { ok: true, itemIds, reviewed }) ??
+        `${reviewed ? "Marked" : "Unmarked"} ${itemIds.length} reviewed\n`,
+    };
+  }
+  if (subcommand !== undefined) throw new Error(`Unknown review command '${subcommand}'.`);
+  const review = await service.review();
+  const items = boolFlag(args, "all")
+    ? review.items
+    : review.items.filter((item) => item.reviewedAt === null);
+  return {
+    exitCode: 0,
+    stdout: optionalJson(args, { toReview: review.toReview, items }) ?? printReview(items),
+  };
 }
 
 export function registerAutomationCli(args: {
@@ -975,55 +1019,61 @@ export function registerAutomationCli(args: {
   const { bb, service } = args;
   bb.cli.register({
     name: "automation",
-    summary: "Inspect and manage automations (scheduled agent/script runs)",
+    summary: "Inspect and manage loops: scheduled agent and script runs (`room-cli loop` works too)",
     commands: [
       {
         name: "list",
-        summary: "List automations for a project",
+        summary: "List loops for a project",
         usage: "room-cli automation list --project <id> [--json]",
       },
       {
         name: "create",
-        summary: "Create an automation",
+        summary: "Create a loop",
         usage:
           "room-cli automation create --project <id> --name <name> [schedule flags] [mode flags]",
       },
       {
         name: "show",
-        summary: "Show automation details",
+        summary: "Show loop details",
         usage: "room-cli automation show <automationId> --project <id> [--json]",
       },
       {
         name: "update",
-        summary: "Update automation configuration",
+        summary: "Update loop configuration",
         usage:
           "room-cli automation update <automationId> --project <id> [flags] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (target is kept unless one is given)",
       },
       {
         name: "pause",
-        summary: "Pause an automation",
+        summary: "Pause a loop",
         usage: "room-cli automation pause <automationId> --project <id> [--json]",
       },
       {
         name: "resume",
-        summary: "Resume an automation",
+        summary: "Resume a loop",
         usage: "room-cli automation resume <automationId> --project <id> [--json]",
       },
       {
         name: "run",
-        summary: "Run an automation now",
+        summary: "Run a loop now",
         usage:
           "room-cli automation run <automationId> --project <id> [--idempotency-key <key>] [--json]",
       },
       {
         name: "runs",
-        summary: "List automation runs",
+        summary: "List loop runs",
         usage:
           "room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>] [--json]",
       },
       {
+        name: "review",
+        summary: "List what loops did on their own, and mark items reviewed",
+        usage:
+          "room-cli automation review [--all] [--json] | room-cli automation review mark <itemId...> [--undo]",
+      },
+      {
         name: "delete",
-        summary: "Delete an automation",
+        summary: "Delete a loop",
         usage:
           "room-cli automation delete <automationId> --project <id> --yes [--json]",
       },
@@ -1036,6 +1086,7 @@ export function registerAutomationCli(args: {
           return { exitCode: 0, stdout: helpText() };
         }
         if (isCloudCommand(parsed)) return await runCloudCommand(bb, parsed, ctx);
+        if (command === "review") return await runReviewCommand(service, parsed);
         if (command === "list") {
           const result = service.list({
             projectId: requireFlag(parsed, "project"),
@@ -1046,7 +1097,7 @@ export function registerAutomationCli(args: {
             stdout:
               json ??
               (result.length === 0
-                ? "No automations found\n"
+                ? "No loops found\n"
                 : printAutomationTable(result)),
           };
         }
@@ -1072,7 +1123,7 @@ export function registerAutomationCli(args: {
             exitCode: 0,
             stdout:
               json ??
-              `Automation created: ${created.id}\n${printAutomation(created)}${printScriptFileSnapshotNote(created, scriptSource)}`,
+              `Loop created: ${created.id}\n${printAutomation(created)}${printScriptFileSnapshotNote(created, scriptSource)}`,
           };
         }
         if (command === "show") {
@@ -1105,7 +1156,7 @@ export function registerAutomationCli(args: {
             exitCode: 0,
             stdout:
               json ??
-              `Automation ${updated.id} updated\n${printAutomation(updated)}${printScriptFileSnapshotNote(updated, scriptSource)}`,
+              `Loop ${updated.id} updated\n${printAutomation(updated)}${printScriptFileSnapshotNote(updated, scriptSource)}`,
           };
         }
         if (command === "pause" || command === "resume") {
@@ -1122,7 +1173,7 @@ export function registerAutomationCli(args: {
             exitCode: 0,
             stdout:
               json ??
-              `Automation ${updated.id} ${command === "pause" ? "paused" : "resumed"}\n`,
+              `Loop ${updated.id} ${command === "pause" ? "paused" : "resumed"}\n`,
           };
         }
         if (command === "run") {
@@ -1198,11 +1249,11 @@ export function registerAutomationCli(args: {
           const json = optionalJson(parsed, value);
           return {
             exitCode: 0,
-            stdout: json ?? `Automation ${automationId} deleted\n`,
+            stdout: json ?? `Loop ${automationId} deleted\n`,
           };
         }
         throw new Error(
-          `Unknown automation command '${command}'.\n\n${helpText()}`,
+          `Unknown loop command '${command}'.\n\n${helpText()}`,
         );
       } catch (error) {
         return {

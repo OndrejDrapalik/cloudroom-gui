@@ -206,6 +206,7 @@ export const PROJECT_LIST_ACTION_BUTTON_CLASS = cn(
 interface ProjectThreadListStateArgs {
   status: ConnectionAwareQueryStatus | undefined;
   threads: ThreadListEntry[] | undefined;
+  pinnedCount?: number;
 }
 
 interface ToggleCollapsedIdListArgs {
@@ -304,12 +305,14 @@ const EMPTY_SECTION_DEFINITIONS: readonly ThreadSectionResponse[] = [];
 function getProjectThreadListState({
   status,
   threads,
+  pinnedCount,
 }: ProjectThreadListStateArgs): ProjectThreadListState {
   switch (status) {
     case "ready":
       return {
         status: "ready",
         threads: threads ?? [],
+        ...(pinnedCount ? { pinnedCount } : {}),
       };
     case "unavailable":
       return { status: "unavailable" };
@@ -800,9 +803,16 @@ function ProjectModeSections({
     const resolveSidebarProjectId = createSidebarProjectIdResolver(
       new Map(threads.map((thread) => [thread.id, thread])),
     );
+    const pinnedCounts = new Map<string, number>();
     for (const thread of threads) {
-      if (effectivePinnedThreadIds.has(thread.id)) continue;
       const sidebarProjectId = resolveSidebarProjectId(thread);
+      if (effectivePinnedThreadIds.has(thread.id)) {
+        pinnedCounts.set(
+          sidebarProjectId,
+          (pinnedCounts.get(sidebarProjectId) ?? 0) + 1,
+        );
+        continue;
+      }
       const existing = grouped.get(sidebarProjectId);
       if (existing) {
         existing.push(thread);
@@ -810,7 +820,7 @@ function ProjectModeSections({
         grouped.set(sidebarProjectId, [thread]);
       }
     }
-    return grouped;
+    return { grouped, pinnedCounts };
   }, [effectivePinnedThreadIds, threads]);
   const projectRows = useMemo<ProjectListRowModel[]>(
     () =>
@@ -818,7 +828,8 @@ function ProjectModeSections({
         project,
         threadListState: getProjectThreadListState({
           status,
-          threads: threadsByProject.get(project.id),
+          threads: threadsByProject.grouped.get(project.id),
+          pinnedCount: threadsByProject.pinnedCounts.get(project.id),
         }),
         isActive: false,
         isLocalPathInvalid: isHostPathMissing(
@@ -850,7 +861,7 @@ function ProjectModeSections({
   }, [projectRows]);
   const personalThreads = useMemo(
     () =>
-      threadsByProject
+      threadsByProject.grouped
         .get(PERSONAL_PROJECT_ID)
         ?.filter(isSidebarProjectThread) ?? EMPTY_THREAD_LIST,
     [threadsByProject],

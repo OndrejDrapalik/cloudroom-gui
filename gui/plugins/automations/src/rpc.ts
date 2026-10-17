@@ -8,8 +8,11 @@ import {
   automationsOverviewResponseSchema,
   type AutomationAgentSummary,
   createAutomationInputSchema,
+  linkThreadInputSchema,
   listAutomationsInputSchema,
   projectAutomationInputSchema,
+  reviewMarkInputSchema,
+  reviewResponseSchema,
   runAutomationInputSchema,
   updateAutomationInputSchema,
 } from "./rpc-types.js";
@@ -61,6 +64,18 @@ export const automationRpcContract = defineRpcContract({
   automations_runs: {
     input: automationRunsInputSchema,
     output: automationRunListResponseSchema,
+  },
+  automations_review: {
+    input: z.null(),
+    output: reviewResponseSchema,
+  },
+  automations_review_mark: {
+    input: reviewMarkInputSchema,
+    output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  automations_link_thread: {
+    input: linkThreadInputSchema,
+    output: z.object({ linked: z.boolean() }).strict(),
   },
   // Cloud automations (ADR 0212) live on the website; the app passes requests through.
   cloud_automations: {
@@ -148,6 +163,15 @@ export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
     },
     automations_runs(input: z.output<typeof automationRunsInputSchema>) {
       return service.runs(input);
+    },
+    automations_review() {
+      return service.review();
+    },
+    automations_review_mark(input: z.output<typeof reviewMarkInputSchema>) {
+      return service.markReviewed(input);
+    },
+    automations_link_thread(input: z.output<typeof linkThreadInputSchema>) {
+      return service.linkThread(input);
     },
   };
 }

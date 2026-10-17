@@ -646,6 +646,11 @@ export class SandboxDirectory {
     this.uploaded.set(name, digest);
   }
 
+  /** The account's Codex accounts, which only the website renews (codex-accounts.ts). */
+  codexAccounts(body: Record<string, unknown>): Promise<unknown> {
+    return this.call(body, "codex-accounts");
+  }
+
   /** The account's Cloud environment, shared with the website: variables (names only), repos, and the setup script. */
   async environment(request: CloudEnvironmentRequest | McpChange): Promise<CloudEnvironment> {
     const environment = environmentSchema.parse(await this.call(request, "environment"));

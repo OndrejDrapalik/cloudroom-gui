@@ -40,7 +40,6 @@ import {
   requireReadyThreadEnvironment,
   type ReadyThreadEnvironment,
 } from "./thread-turn-dispatch.js";
-import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import { ensureHostSessionReadyForWork } from "../hosts/host-lifecycle.js";
 import {
   LIVE_DAEMON_COMMAND_TIMEOUT_MS,
@@ -290,9 +289,6 @@ async function queueActiveParentSystemMessage(
       });
     }
   }
-  const permissionEscalation = resolvePermissionEscalation({
-    initiator: "system",
-  });
   await ensureHostSessionReadyForWork(deps, {
     hostId: args.environment.hostId,
   });
@@ -300,7 +296,7 @@ async function queueActiveParentSystemMessage(
     thread: args.thread,
     input: args.input,
     execution: args.execution,
-    permissionEscalation,
+    permissionEscalation: "ask",
     target: {
       mode: "auto",
       expectedTurnId: expectedSteerTurnId,
@@ -350,9 +346,6 @@ async function queueReadyParentSystemMessage(
     return queueActiveParentSystemMessage(deps, args);
   }
 
-  const permissionEscalation = resolvePermissionEscalation({
-    initiator: "system",
-  });
   const requestId = createClientTurnRequestId();
 
   const command = await prepareReadyThreadTurnCommand(deps, {
@@ -361,7 +354,7 @@ async function queueReadyParentSystemMessage(
     input: args.input,
     requestId,
     execution: args.execution,
-    permissionEscalation,
+    permissionEscalation: "ask",
     environment: {
       id: args.environment.id,
       hostId: args.environment.hostId,

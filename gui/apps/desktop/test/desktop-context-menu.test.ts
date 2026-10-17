@@ -51,7 +51,7 @@ const DEFAULT_MEDIA_FLAGS = {
 
 interface FakeWebContents extends Pick<
   DesktopContextMenuWebContents,
-  "copyImageAt" | "replaceMisspelling" | "send" | "session"
+  "copyImageAt" | "downloadURL" | "replaceMisspelling" | "send" | "session"
 > {
   addedDictionaryWords: string[];
   replacedMisspellings: string[];
@@ -101,6 +101,7 @@ function createFakeWebContents(): FakeWebContents {
     replacedMisspellings,
     spellCheckerEnabledValues,
     copyImageAt() {},
+    downloadURL() {},
     send() {},
     replaceMisspelling(text) {
       replacedMisspellings.push(text);
@@ -113,6 +114,7 @@ function createFakeWebContents(): FakeWebContents {
       setSpellCheckerEnabled(enabled) {
         spellCheckerEnabledValues.push(enabled);
       },
+      once() {},
     },
   };
 }

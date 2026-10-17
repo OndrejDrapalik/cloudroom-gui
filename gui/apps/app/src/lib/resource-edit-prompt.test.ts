@@ -31,7 +31,7 @@ describe("resource edit thread prompts", () => {
         automationId: "auto_456",
       }),
     ).toBe(
-      'Edit the Cloudroom automation "Daily triage" (ID auto_456) in project proj_123. I want to ',
+      'Edit the Cloudroom loop "Daily triage" (ID auto_456) in project proj_123. I want to ',
     );
   });
 });

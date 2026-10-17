@@ -152,10 +152,27 @@ export interface MacMcpServer {
 /** A CLI on this Mac with the setup-script lines that install it in a cloud sandbox. `key`: the API key it signs in with. */
 export interface MacCli { name: string; title: string; key?: string; install: string }
 
+/** Codex accounts the website keeps and renews (ADR 0195). Responses never hold tokens. */
+export type CodexAccountsInput =
+  | { action: "list" | "start" }
+  | { action: "poll"; sessionId: string }
+  | { action: "use"; id: string | null }
+  | { action: "remove"; id: string }
+  | { action: "rename"; id: string; name: string }
+  | { action: "move"; id: string; direction: "up" | "down" };
+export interface CodexAccountView { id: string; name: string | null; email: string | null; plan: string | null; inUse: boolean; error: string | null; windows: { label: string; usedPercent: number; resetsAt: number | null }[] }
+export type CodexAccountsResult =
+  | { signedIn: boolean; accounts: CodexAccountView[] }
+  | { sessionId: string; verificationUri: string; userCode: string; expiresAt: number }
+  | { status: "pending" | "complete" | "error"; message: string | null };
+
 export interface ClaudeAccountInput { action?: "login" | "cancel" | "complete" | "setup-token" | "key" | "token"; requestId?: string; code?: string; state?: string; apiKey?: string; token?: string; plan?: string }
 
 export interface CloudroomArea {
   claudeAuth(input?: ClaudeAccountInput, signal?: AbortSignal): Promise<CloudroomCodexAuth>;
+  /** Lists, signs in, selects, renames, orders, or removes Codex accounts. `list` answers `{ signedIn, accounts }`,
+   *  `start` the device code, and `poll` the sign-in's status. Other actions answer the new list. */
+  codexAccounts(input: CodexAccountsInput, signal?: AbortSignal): Promise<CodexAccountsResult>;
   cursorAuth(signal?: AbortSignal): Promise<CloudroomCodexAuth>;
   cursorLogin(requestId: string): Promise<CloudroomCodexAuth>;
   cancelCursorLogin(requestId: string): Promise<CloudroomCodexAuth>;
@@ -289,6 +306,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
   });
   return {
     claudeAuth: (input, signal) => transport.readJson(request(`/claude${input?.action ? `/${input.action}` : ""}`, input?.action ? { requestId: input.requestId, ...(input.action === "complete" ? { code: input.code, state: input.state } : {}), ...(input.action === "key" ? { apiKey: input.apiKey } : {}), ...(input.action === "token" ? { token: input.token, plan: input.plan } : {}) } : undefined, signal)) as Promise<CloudroomCodexAuth>,
+    codexAccounts: (input, signal) => transport.readJson(request("/codex-accounts", input, signal)) as Promise<CodexAccountsResult>,
     cursorAuth: (signal) => transport.readJson(request("/cursor", undefined, signal)) as Promise<CloudroomCodexAuth>,
     cursorLogin: (requestId) => transport.readJson(request("/cursor/login", { requestId })) as Promise<CloudroomCodexAuth>,
     cancelCursorLogin: (requestId) => transport.readJson(request("/cursor/cancel", { requestId })) as Promise<CloudroomCodexAuth>,

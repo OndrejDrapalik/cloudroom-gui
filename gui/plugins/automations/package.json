@@ -1,7 +1,7 @@
 {
   "name": "bb-plugin-automations",
   "version": "0.1.0",
-  "description": "Schedule recurring and one-shot agent or script work.",
+  "description": "Loops: run agents and scripts on a schedule, locally or in the cloud, and review what they did.",
   "private": true,
   "type": "module",
   "exports": {
@@ -15,8 +15,8 @@
     "bbPluginSdk": ">=0.4.84"
   },
   "bb": {
-    "name": "Automations",
-    "description": "Schedule recurring and one-shot agent or script work.",
+    "name": "Loops",
+    "description": "Run agents and scripts on a schedule, locally or in the cloud, and review what they did.",
     "branding": {
       "icon": "Repeat"
     },

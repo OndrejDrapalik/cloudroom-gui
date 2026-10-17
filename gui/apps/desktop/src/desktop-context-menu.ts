@@ -1,7 +1,10 @@
+import { join } from "node:path";
 import {
+  app,
   clipboard,
   Menu,
   type ContextMenuParams,
+  type DownloadItem,
   type Event,
   type MenuItemConstructorOptions,
   type Session,
@@ -14,12 +17,18 @@ export interface DesktopContextMenuWebContents {
     listener: (event: Event, params: ContextMenuParams) => void,
   ): void;
   copyImageAt(x: number, y: number): void;
+  downloadURL(url: string): void;
   replaceMisspelling(text: string): void;
   send(channel: string, payload: unknown): void;
   session: Pick<
     Session,
     "addWordToSpellCheckerDictionary" | "setSpellCheckerEnabled"
-  >;
+  > & {
+    once(
+      eventName: "will-download",
+      listener: (event: Event, item: DownloadItem) => void,
+    ): unknown;
+  };
 }
 
 interface DesktopContextMenuSpellcheckContext {
@@ -31,7 +40,7 @@ interface BuildDesktopContextMenuTemplateArgs {
   params: ContextMenuParams;
   webContents: Pick<
     DesktopContextMenuWebContents,
-    "copyImageAt" | "replaceMisspelling" | "send" | "session"
+    "copyImageAt" | "downloadURL" | "replaceMisspelling" | "send" | "session"
   >;
 }
 
@@ -56,6 +65,21 @@ function trimTrailingSeparator(
     return template;
   }
   return template.slice(0, -1);
+}
+
+function imageFileName(srcURL: string, fallback: string): string {
+  try {
+    const url = new URL(srcURL);
+    const name = (
+      url.searchParams.get("path") ?? decodeURIComponent(url.pathname)
+    )
+      .split(/[/\\]/u)
+      .at(-1);
+    if (name !== undefined && /^[\p{L}\p{N} ._()-]+\.\w+$/u.test(name)) {
+      return name;
+    }
+  } catch {}
+  return fallback;
 }
 
 function getSpellcheckContextFromParams(
@@ -126,6 +150,20 @@ export function buildDesktopContextMenuTemplate({
         label: "Copy Image",
         click: () => {
           webContents.copyImageAt(params.x, params.y);
+        },
+      },
+      {
+        label: "Save Image As…",
+        click: () => {
+          webContents.session.once("will-download", (_event, item) => {
+            item.setSaveDialogOptions({
+              defaultPath: join(
+                app.getPath("downloads"),
+                imageFileName(params.srcURL, item.getFilename()),
+              ),
+            });
+          });
+          webContents.downloadURL(params.srcURL);
         },
       },
     );

@@ -1609,6 +1609,38 @@ export function requestActiveRuntimeThreadStopIfNeeded(
   });
 }
 
+/**
+ * A failed turn does not prove the harness stopped: Pi compacts and retries a
+ * context overflow on its own while the thread shows error. So archiving a
+ * failed thread releases its runtime even mid-turn, then forwards the archive.
+ */
+export function releaseFailedThreadRuntimeThenArchive(
+  deps: CommandResultSideEffectsDeps & RequestThreadStopForCurrentStateDeps,
+  threadId: string,
+  environment: { hostId: string; id: string },
+): void {
+  void runAwaitedThreadStopCommand(deps, {
+    command: buildThreadStopCommand({
+      environmentId: environment.id,
+      hostId: environment.hostId,
+      immediate: true,
+      intent: "release",
+      threadId,
+    }),
+    hostId: environment.hostId,
+    threadId,
+  })
+    .catch((error) =>
+      deps.logger.warn(
+        { err: error, threadId },
+        "Archived thread runtime release failed",
+      ),
+    )
+    .finally(() =>
+      dispatchSettledArchivedThreadProviderArchiveCommand(deps, { threadId }),
+    );
+}
+
 function interruptActiveTurnForThreadInTransaction(
   deps: ThreadLifecycleTransactionDeps,
   args: InterruptActiveTurnForThreadArgs,

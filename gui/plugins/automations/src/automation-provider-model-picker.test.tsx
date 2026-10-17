@@ -140,7 +140,7 @@ describe("automation provider and model picker", () => {
     ).toBe(true);
     const save = screen.getByRole("button", { name: "Save Prompt" });
     expect((save as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("Automation prompt"), {
+    fireEvent.change(screen.getByLabelText("Loop prompt"), {
       target: { value: "Review the failed build" },
     });
     expect((save as HTMLButtonElement).disabled).toBe(false);

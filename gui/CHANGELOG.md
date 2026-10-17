@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 107
+
+Loops and multiple Codex accounts (2026-10-16)
+
+### Changes
+
+- Automations are now called Loops, with new Overview and Review tabs.
+- Use several Codex accounts across Local and Cloud threads.
+- Settings → Machines lists every Mac on your account and lets you switch between them.
+- Settings → Accounts shows cleaner account tiles with full usage bars.
+- Cloud /compact shows when it finishes and waits for a sleeping agent to wake up.
+- Turns started by agents or automations now ask you for approvals instead of silently denying them.
+- Double-click to rename on Mac, right-click images to save them, and Linux no longer shows a crash dialog.
+
 ## 106
 
 Cloud without GitHub, steadier Mac access (2026-10-15)

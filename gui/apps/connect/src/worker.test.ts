@@ -136,10 +136,9 @@ beforeAll(async () => {
     outboundService: (request: unknown) => website(request as Request),
   });
   const db = await mf.getD1Database("DB");
-  const migration = readFileSync(
-    fileURLToPath(new URL("../migrations/0001_init.sql", import.meta.url)),
-    "utf8",
-  );
+  const migration = ["0001_init.sql", "0002_server_name.sql"]
+    .map((file) => readFileSync(fileURLToPath(new URL(`../migrations/${file}`, import.meta.url)), "utf8"))
+    .join(";\n");
   for (const statement of migration.replace(/--.*$/gm, "").split(";")) {
     if (statement.trim()) await db.prepare(statement).run();
   }

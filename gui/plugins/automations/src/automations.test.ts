@@ -1377,7 +1377,7 @@ describe("automation CLI --script-file", () => {
   }
 
   function idFrom(stdout: string | undefined): string {
-    const id = /Automation created: (\S+)/.exec(stdout ?? "")?.[1];
+    const id = /Loop created: (\S+)/.exec(stdout ?? "")?.[1];
     if (!id) throw new Error(`no id in: ${stdout}`);
     return id;
   }

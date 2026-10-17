@@ -5,6 +5,7 @@ const SEEN_WRITE_INTERVAL_MS = 60_000;
 export const PHONE_CODE_TTL_MS = 10 * 60_000;
 export const SHARE_CODE_TTL_MS = 60_000;
 export const SESSION_TTL_MS = 365 * 24 * 60 * 60_000;
+export const DESKTOP_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 
 export interface Server {
   id: string;
@@ -12,6 +13,7 @@ export interface Server {
   handle: string;
   credentialHash: string;
   lastSeenAt: number | null;
+  name: string | null;
 }
 
 export interface Session {
@@ -81,6 +83,7 @@ interface ServerRow {
   handle: string;
   credential_hash: string;
   last_seen_at: number | null;
+  name?: string | null;
 }
 
 function toServer(row: ServerRow | null): Server | null {
@@ -91,6 +94,7 @@ function toServer(row: ServerRow | null): Server | null {
         handle: row.handle,
         credentialHash: row.credential_hash,
         lastSeenAt: row.last_seen_at,
+        name: row.name ?? null,
       }
     : null;
 }
@@ -126,6 +130,19 @@ export async function serverByCredential(
       .bind(await sha256Hex(credential))
       .first<ServerRow>(),
   );
+}
+
+/** Every Mac on one Cloudroom account, oldest first. */
+export async function accountServers(db: D1Database, userId: string): Promise<Server[]> {
+  const { results } = await db
+    .prepare("SELECT * FROM server WHERE user_id = ? ORDER BY created_at")
+    .bind(userId)
+    .all<ServerRow>();
+  return results.map((row) => toServer(row)!);
+}
+
+export async function setServerName(db: D1Database, serverId: string, name: string): Promise<void> {
+  await db.prepare("UPDATE server SET name = ? WHERE id = ?").bind(name, serverId).run();
 }
 
 export async function registerServer(
@@ -221,6 +238,7 @@ export async function createSession(
   db: D1Database,
   serverId: string,
   target: string | null,
+  ttlMs = SESSION_TTL_MS,
 ): Promise<string> {
   const now = Date.now();
   const token = randomToken();
@@ -230,7 +248,7 @@ export async function createSession(
       .prepare(
         "INSERT INTO session (token_hash, server_id, target, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
       )
-      .bind(await sha256Hex(token), serverId, target, now + SESSION_TTL_MS, now),
+      .bind(await sha256Hex(token), serverId, target, now + ttlMs, now),
   ]);
   return token;
 }

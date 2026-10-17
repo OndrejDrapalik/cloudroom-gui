@@ -74,7 +74,7 @@ export function ProjectHideDialog({
       {target ? (
         <ConfirmDeleteDialogContent
           title="Hide project?"
-          description={`Hide "${target.name}" from the sidebar? Its threads and automations keep running. To bring it back, add its folder again or use Settings → Projects.`}
+          description={`Hide "${target.name}" from the sidebar? Its threads and loops keep running. To bring it back, add its folder again or use Settings → Projects.`}
           confirmLabel="Hide project"
           confirmVariant="default"
           pending={pending}

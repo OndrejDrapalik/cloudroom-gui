@@ -46,7 +46,6 @@ import {
   dispatchTurnDuringReprovision,
   requireReadyThreadEnvironment,
 } from "./thread-turn-dispatch.js";
-import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import {
   buildThreadStatusChangeMetadata,
   resolveThreadRuntimeState,
@@ -595,10 +594,6 @@ async function sendThreadMessageWithoutContextClear(
   // other callers bypass the checkpoint deliberately: a manual compaction turn
   // and an edited message's re-send are operations on the thread's existing
   // conversation, not new work a limiter admits.
-  const permissionEscalation = resolvePermissionEscalation({
-    initiator,
-  });
-
   if (
     await dispatchTurnDuringReprovision({
       beforeRequestAppendInTransaction: beforeAppendInTransaction,
@@ -651,7 +646,7 @@ async function sendThreadMessageWithoutContextClear(
       ...(inputGroups !== undefined ? { inputGroups } : {}),
       requestId,
       execution,
-      permissionEscalation,
+      permissionEscalation: "ask" as const,
       environment: {
         id: readyEnvironment.id,
         hostId: readyEnvironment.hostId,
@@ -759,7 +754,7 @@ async function sendThreadMessageWithoutContextClear(
     input,
     ...(inputGroups !== undefined ? { inputGroups } : {}),
     execution,
-    permissionEscalation,
+    permissionEscalation: "ask",
     target: {
       mode,
       expectedTurnId: expectedSteerTurnId,

@@ -17,6 +17,7 @@ import type {
   AutomationRunListResponse,
   AutomationRunResponse,
   AutomationsOverviewResponse,
+  ReviewResponse,
 } from "@/src/rpc-types";
 import { AutomationDetailView } from "./detail-view";
 import { useCloudAutomations } from "./cloud-view";
@@ -25,6 +26,7 @@ import {
   automationProjectLabel,
   CREATE_AUTOMATION_PROMPT,
   type AutomationCollectionMode,
+  type LoopReviewState,
 } from "./overview-view";
 import { PERSONAL_PROJECT_ID } from "./lib/format-schedule";
 import { Button } from "@cloudroom/shared-ui/button";
@@ -162,6 +164,73 @@ function useOverview(): {
     if (asSignal(payload) !== null) scheduleRefetch();
   });
   return { ...state, refetch };
+}
+
+function useReview(): LoopReviewState {
+  const rpc = useRpc<typeof automationRpcContract>();
+  const navigate = useBbNavigate();
+  const [state, setState] = useState<{
+    data: ReviewResponse | null;
+    error: string | null;
+  }>({ data: null, error: null });
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const load = useCallback(() => {
+    rpc.call("automations_review").then(
+      (data) => setState({ data, error: null }),
+      (error: unknown) =>
+        setState((current) =>
+          current.data === null
+            ? { data: null, error: errorText(error) }
+            : current,
+        ),
+    );
+  }, [rpc]);
+  useEffect(() => {
+    load();
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, [load]);
+  useRealtime("automations", (payload) => {
+    if (asSignal(payload) === null || timerRef.current !== null) return;
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      load();
+    }, 250);
+  });
+  const onMark = useCallback(
+    (itemIds: string[], reviewed: boolean) => {
+      setState((current) =>
+        current.data === null
+          ? current
+          : {
+              ...current,
+              data: {
+                ...current.data,
+                items: current.data.items.map((item) =>
+                  itemIds.includes(item.id)
+                    ? { ...item, reviewedAt: reviewed ? Date.now() : null }
+                    : item,
+                ),
+              },
+            },
+      );
+      rpc.call("automations_review_mark", { itemIds, reviewed }).then(
+        () => load(),
+        (error: unknown) => {
+          toast.error(`Couldn't save the review: ${errorText(error)}`);
+          load();
+        },
+      );
+    },
+    [load, rpc],
+  );
+  return {
+    ...state,
+    onRetry: load,
+    onOpenThread: (threadId: string) => navigate.toThread(threadId),
+    onMark,
+  };
 }
 
 function useAutomation(route: DetailRoute): {
@@ -351,7 +420,7 @@ function DeleteAutomationDialog({
         {open ? (
           <>
             <DialogHeader>
-              <DialogTitle>Delete automation?</DialogTitle>
+              <DialogTitle>Delete loop?</DialogTitle>
               <DialogDescription>
                 &ldquo;{name}&rdquo; and its run history will be permanently
                 removed.
@@ -394,6 +463,7 @@ function OverviewView({
   const navigate = useBbNavigate();
   const { entries, error, refetch } = useOverview();
   const cloud = useCloudAutomations();
+  const review = useReview();
   const mutations = useMutations();
 
   const changeEnabled = useCallback(
@@ -402,7 +472,7 @@ function OverviewView({
       try {
         await mutations[method](route);
       } catch (rpcError: unknown) {
-        toast.error(`Failed to ${method} automation: ${errorText(rpcError)}`);
+        toast.error(`Failed to ${method} loop: ${errorText(rpcError)}`);
       }
     },
     [mutations],
@@ -429,6 +499,7 @@ function OverviewView({
       activeMode={activeMode}
       onModeChange={onModeChange}
       cloud={cloud}
+      review={review}
     />
   );
 }
@@ -480,9 +551,7 @@ function DetailView({
             if (method === "run") toast.success("Run started");
           },
           (rpcError: unknown) =>
-            toast.error(
-              `Failed to ${method} automation: ${errorText(rpcError)}`,
-            ),
+            toast.error(`Failed to ${method} loop: ${errorText(rpcError)}`),
         )
         .finally(() => setActionPending(false));
     },
@@ -503,11 +572,11 @@ function DetailView({
       setActionPending(true);
       try {
         await mutations.update(route, agent);
-        toast.success("Automation updated");
+        toast.success("Loop updated");
         setEditingRequested(false);
         refetch();
       } catch (rpcError: unknown) {
-        toast.error(`Failed to update automation: ${errorText(rpcError)}`);
+        toast.error(`Failed to update loop: ${errorText(rpcError)}`);
         throw rpcError;
       } finally {
         setActionPending(false);
@@ -522,12 +591,12 @@ function DetailView({
       .delete(route)
       .then(
         () => {
-          toast.success("Automation deleted");
+          toast.success("Loop deleted");
           setDeleteOpen(false);
           onBack();
         },
         (rpcError: unknown) =>
-          toast.error(`Failed to delete automation: ${errorText(rpcError)}`),
+          toast.error(`Failed to delete loop: ${errorText(rpcError)}`),
       )
       .finally(() => setDeleting(false));
   }, [mutations, route, onBack]);
@@ -536,7 +605,7 @@ function DetailView({
     return (
       <ResourceListState
         state="error"
-        message={`Couldn't load automation: ${error}`}
+        message={`Couldn't load loop: ${error}`}
         layout="detail"
         onRetry={refetch}
       />
@@ -548,7 +617,7 @@ function DetailView({
       <DelayedLoading>
         <ResourceListState
           state="loading"
-          message="Loading automation"
+          message="Loading loop"
           layout="detail"
         />
       </DelayedLoading>
@@ -572,7 +641,7 @@ function DetailView({
         <div className="mx-auto w-full max-w-3xl space-y-3">
           <ResourceListState
             state="error"
-            message="The stored automation configuration cannot be read."
+            message="The stored loop configuration cannot be read."
             layout="detail"
             onRetry={refetch}
           />
@@ -584,7 +653,7 @@ function DetailView({
               disabled={deleting}
               onClick={() => setDeleteOpen(true)}
             >
-              Delete automation
+              Delete loop
             </Button>
           </div>
         </div>
@@ -639,7 +708,7 @@ function AutomationsPageFrame({
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
       <div
         className={cn(
-          "mx-auto box-border min-h-full w-full max-w-5xl px-4 pb-4 pt-3 md:px-5 md:pt-4",
+          "mx-auto box-border min-h-full w-full max-w-5xl px-4 pb-4 pt-3 md:px-10 md:pt-4",
           fill && "h-full",
         )}
       >
@@ -653,7 +722,7 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
   const navigate = useBbNavigate();
   const parsedRoute = useMemo(() => parseSubPath(subPath), [subPath]);
   const collectionMode: AutomationCollectionMode =
-    subPath === "browse" ? "browse" : "installed";
+    subPath === "browse" || subPath === "review" ? subPath : "installed";
   const openDetail = useCallback(
     (next: DetailRoute, options?: { editing?: boolean }) => {
       navigate.toPluginPanel(PANEL_PATH, {
@@ -700,7 +769,7 @@ function AutomationsPanel({ subPath }: PluginNavPanelProps) {
 export default definePluginApp((app) => {
   app.slots.navPanel({
     id: "automations",
-    title: "Automations",
+    title: "Loops",
     icon: "Repeat",
     path: PANEL_PATH,
     component: AutomationsPanel,

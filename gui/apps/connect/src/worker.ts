@@ -10,9 +10,11 @@ import {
   TUNNEL_TARGET_HEADER,
 } from "./protocol-headers.js";
 import {
+  DESKTOP_SESSION_TTL_MS,
   PHONE_CODE_TTL_MS,
   SESSION_TTL_MS,
   SHARE_CODE_TTL_MS,
+  accountServers,
   codeHandle,
   consumeCode,
   createCode,
@@ -25,6 +27,7 @@ import {
   serverByCredential,
   serverByHandle,
   sessionByToken,
+  setServerName,
   sha256Hex,
   type Server,
   type Session,
@@ -37,6 +40,7 @@ const WRONG_CODE = "That code is wrong or expired. Get a new one in the Cloudroo
 const PORT = /^[1-9][0-9]{0,4}$/;
 const CLOUD_PATH = /^\/__cloud\/([a-z0-9_/-]{1,200})$/;
 const TOKEN = /^[a-f0-9]{64}$/;
+const HANDLE = /^[a-z0-9]{1,63}$/;
 const PUBLIC_APP_FILES =
   /^\/(?:manifest[\w-]*\.webmanifest|apple-touch-icon[\w-]*\.png|icon-[\w-]+\.png|favicon[\w.-]*)$/;
 
@@ -59,6 +63,58 @@ function json(value: unknown, status = 200): Response {
   });
 }
 
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  const body: unknown = await request.json().catch(() => null);
+  return body !== null && typeof body === "object" ? (body as Record<string, unknown>) : {};
+}
+
+function computerName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 64) || null;
+}
+
+/** Asks the Mac's tunnel object, so it's right the moment a Mac sleeps or wakes. */
+async function isOnline(env: Env, handle: string): Promise<boolean> {
+  const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(handle));
+  const status = await stub
+    .fetch(new Request(`https://${handle}.${env.BASE_DOMAIN}/__control/status`))
+    .then((response) => response.json() as Promise<{ online?: unknown }>)
+    .catch(() => null);
+  return status?.online === true;
+}
+
+/** Your Macs, for switching between them (signed in to the same Cloudroom account). Also saves the caller's name. */
+async function computers(request: Request, env: Env, self: Server): Promise<Response> {
+  const name = computerName((await readJson(request)).name);
+  if (name !== null && name !== self.name) await setServerName(env.DB, self.id, name).catch(() => {});
+  const servers = await accountServers(env.DB, self.userId);
+  return json({
+    selfHandle: self.handle,
+    computers: await Promise.all(
+      servers.map(async (server) => ({
+        handle: server.handle,
+        name: (server.id === self.id ? name : null) ?? server.name ?? "Mac",
+        live: server.id === self.id || (await isOnline(env, server.handle)),
+        url: `https://${server.handle}.${env.BASE_DOMAIN}`,
+      })),
+    ),
+  });
+}
+
+/** Signs the caller in to another Mac on the same account. The desktop app installs the cookie and opens the Mac. */
+async function openComputer(request: Request, env: Env, self: Server): Promise<Response> {
+  const handle = (await readJson(request)).handle;
+  const target = typeof handle === "string" && HANDLE.test(handle) ? await serverByHandle(env.DB, handle, true) : null;
+  if (!target || target.userId !== self.userId || target.id === self.id) {
+    return json({ error: "That Mac is not on your account." }, 404);
+  }
+  if (!(await isOnline(env, target.handle))) return json({ error: "That Mac is offline.", offline: true }, 409);
+  const origin = `https://${target.handle}.${env.BASE_DOMAIN}`;
+  const expiresAt = Date.now() + DESKTOP_SESSION_TTL_MS;
+  const value = await createSession(env.DB, target.id, null, DESKTOP_SESSION_TTL_MS);
+  return json({ url: origin, cookie: { name: SESSION_COOKIE, value, expiresAt } });
+}
+
 function redirect(location: string, setCookie?: string): Response {
   const headers = new Headers({ location, "cache-control": "no-store" });
   if (setCookie) headers.set("set-cookie", setCookie);
@@ -78,7 +134,7 @@ export function parseVisitorHost(host: string, baseDomain: string): Visitor | nu
   const suffix = `.${baseDomain}`;
   if (!host.endsWith(suffix)) return null;
   const [handle, target, extra] = host.slice(0, -suffix.length).split("--");
-  if (!handle || !/^[a-z0-9]{1,63}$/.test(handle) || extra !== undefined) return null;
+  if (!handle || !HANDLE.test(handle) || extra !== undefined) return null;
   if (target === undefined) return { handle, target: null };
   return PORT.test(target) && Number(target) <= 65535 ? { handle, target } : null;
 }
@@ -185,6 +241,8 @@ async function apex(request: Request, url: URL, env: Env): Promise<Response> {
   if (request.method === "POST" && url.pathname.startsWith("/api/")) {
     const server = await serverByCredential(env.DB, bearer(request));
     if (!server) return json({ error: "Unknown Mac." }, 401);
+    if (url.pathname === "/api/computers") return computers(request, env, server);
+    if (url.pathname === "/api/computers/open") return openComputer(request, env, server);
     if (url.pathname === "/api/phone-code") {
       const { code, expiresAt } = await createCode(env.DB, server.id, null, PHONE_CODE_TTL_MS);
       const formatted = formatCode(code);

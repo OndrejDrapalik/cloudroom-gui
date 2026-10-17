@@ -148,9 +148,7 @@ describe("AutomationOverviewView", () => {
     fireEvent.pointerDown(
       screen.getByRole("button", { name: "Sort: Next run, ascending" }),
     );
-    fireEvent.click(
-      screen.getByRole("menuitemradio", { name: "Automation name" }),
-    );
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Loop name" }));
     expect(rowTitles()).toEqual([
       "Alpha active",
       "Zulu active",
@@ -175,9 +173,9 @@ describe("AutomationOverviewView", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "Installed0" })).toBeTruthy();
-    expect(screen.getByText("No automations installed.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "New automation" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Overview0" })).toBeTruthy();
+    expect(screen.getByText("No loops yet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New loop" })).toBeTruthy();
   });
 
   it("opens a missing-prompt row in the standard editor", () => {
@@ -229,7 +227,7 @@ describe("AutomationOverviewView", () => {
     expect(screen.getByText("Nightly digest")).toBeTruthy();
     expect(screen.getAllByText("9AM")).toHaveLength(2);
 
-    const search = screen.getByPlaceholderText("Search automations");
+    const search = screen.getByPlaceholderText("Search loops");
     fireEvent.change(search, { target: { value: "Prompt required" } });
     expect(screen.getByText("Needs a prompt")).toBeTruthy();
     expect(screen.queryByText("Unreadable automation")).toBeNull();
@@ -337,9 +335,7 @@ describe("AutomationOverviewView", () => {
       screen.getByRole("menuitemcheckbox", { name: "Active" }).ariaChecked,
     ).toBe("false");
     expect(rowTitles()).toEqual([]);
-    expect(
-      screen.getByText("No automations match these filters."),
-    ).toBeTruthy();
+    expect(screen.getByText("No loops match these filters.")).toBeTruthy();
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(
@@ -354,9 +350,7 @@ describe("AutomationOverviewView", () => {
       screen.getByRole("menuitemcheckbox", { name: "bb" }).ariaChecked,
     ).toBe("true");
     expect(rowTitles()).toEqual(["Nightly digest"]);
-    expect(
-      screen.queryByText("No automations match these filters."),
-    ).toBeNull();
+    expect(screen.queryByText("No loops match these filters.")).toBeNull();
   });
 
   it("gives filter and sort triggers the same resting, open, and engaged states", () => {
@@ -438,7 +432,7 @@ describe("AutomationOverviewView", () => {
       name: "Next run",
     });
     const nameOption = screen.getByRole("menuitemradio", {
-      name: "Automation name",
+      name: "Loop name",
     });
     expect(projectOption.getAttribute("aria-disabled")).toBe("true");
     expect(projectOption.getAttribute("aria-checked")).toBe("false");
@@ -479,7 +473,7 @@ describe("AutomationOverviewView", () => {
       name: "Project",
     });
     const nameOption = screen.getByRole("menuitemradio", {
-      name: "Automation name",
+      name: "Loop name",
     });
     expect(projectOption.getAttribute("aria-checked")).toBe("false");
     expect(projectOption.getAttribute("aria-disabled")).toBe("true");
@@ -499,7 +493,7 @@ describe("AutomationOverviewView", () => {
     );
     fireEvent.click(nameOption);
     expect(sortTrigger.getAttribute("aria-label")).toBe(
-      "Sort: Automation name, ascending",
+      "Sort: Loop name, ascending",
     );
     expect(nameOption.getAttribute("aria-checked")).toBe("true");
   });
@@ -596,7 +590,7 @@ describe("AutomationOverviewView", () => {
     );
     expect(row("Plain script").textContent).toContain("Script");
     expect(screen.queryByText("bb")).toBeNull();
-    expect(screen.getByText("Active · 3")).toBeTruthy();
+    expect(screen.getByText("Active loops").nextSibling?.textContent).toBe("3");
   });
 
   it("shows Personal as project membership and keeps it searchable", async () => {
@@ -628,7 +622,7 @@ describe("AutomationOverviewView", () => {
     const icon = screen.getByRole("img", { name: "Project: Personal" });
     expect(icon.querySelector('[data-icon="Folder"]')).not.toBeNull();
     expect(icon.parentElement?.textContent).toBe("Personal");
-    fireEvent.change(screen.getByPlaceholderText("Search automations"), {
+    fireEvent.change(screen.getByPlaceholderText("Search loops"), {
       target: { value: "Personal" },
     });
     expect(screen.getByText("Nightly digest")).toBeTruthy();

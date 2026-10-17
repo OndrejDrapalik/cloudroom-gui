@@ -61,7 +61,6 @@ import {
   isManualCompactionActive,
 } from "./thread-events.js";
 import { requireReadyThreadEnvironment } from "./thread-turn-dispatch.js";
-import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import { hasMessageDispatchHooks } from "./dispatch-hooks.js";
 import { attemptDispatch } from "./dispatch-attempt.js";
 import { deliverParentSystemMessage } from "./parent-system-messages.js";
@@ -496,9 +495,6 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
   const execution = await buildExecutionOptions(deps, payload, {
     threadId: thread.id,
   });
-  const permissionEscalation = resolvePermissionEscalation({
-    initiator,
-  });
   await ensureHostSessionReadyForWork(deps, {
     hostId: environment.hostId,
   });
@@ -507,7 +503,7 @@ async function sendClaimedQueuedMessageForIdleProviderThread(
     execution,
     input,
     ...(inputGroups.length > 1 ? { inputGroups } : {}),
-    permissionEscalation,
+    permissionEscalation: "ask",
     providerThreadId,
     target: { mode: "start" },
     thread,

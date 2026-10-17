@@ -599,6 +599,17 @@ export function registerSpawnCommand(
             ...(sourceSeqEnd !== undefined ? { sourceSeqEnd } : {}),
             ...(sendAt !== undefined ? { sendAt } : {}),
           });
+          const loopRunId = process.env.BB_AUTOMATION_RUN_ID?.trim();
+          if (loopRunId) {
+            await sdk.plugins
+              .callRpc({
+                pluginId: "automations",
+                method: "automations_link_thread",
+                input: { runId: loopRunId, threadId: thread.id },
+                outputSchema: jsonValueSchema,
+              })
+              .catch(() => undefined);
+          }
         } catch (err: unknown) {
           throw prependErrorContext("Failed to create thread", err);
         }

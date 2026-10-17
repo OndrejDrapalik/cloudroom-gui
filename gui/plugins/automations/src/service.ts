@@ -11,7 +11,9 @@ import {
   listAllAutomations,
   listAutomationRuns,
   listAutomationsForProject,
+  linkRunThread,
   setAutomationEnabled,
+  setReviewed,
   toAutomationResponse,
   toAutomationRunResponse,
   updateAutomation,
@@ -24,7 +26,7 @@ import {
   providerRoutingForEnvironment,
   resolvePermissionMode,
 } from "./provider-permissions.js";
-import { publishAutomationChange } from "./realtime.js";
+import { publishAutomationChange, REVIEW_SIGNAL_PROJECT } from "./realtime.js";
 import {
   AUTOMATION_RUNS_LIMIT_MAX,
   automationRunListResponseSchema,
@@ -40,9 +42,11 @@ import {
   type AutomationsOverviewResponse,
   type ResolvedCreateAutomationInput,
   type ResolvedAutomationRunsInput,
+  type ReviewResponse,
   type RunAutomationInput,
   type UpdateAutomationInput,
 } from "./rpc-types.js";
+import { buildReview } from "./review.js";
 import {
   computeInitialNextRunAt,
   computeNextScheduledTime,
@@ -89,6 +93,9 @@ export interface AutomationService {
   }): AutomationResponse;
   run(input: RunAutomationInput): Promise<AutomationRunRpcResponse>;
   runs(input: ResolvedAutomationRunsInput): AutomationRunListResponse;
+  review(): Promise<ReviewResponse>;
+  markReviewed(input: { itemIds: string[]; reviewed: boolean }): { ok: true };
+  linkThread(input: { runId: string; threadId: string }): { linked: boolean };
 }
 
 function requireProjectAutomation(
@@ -96,7 +103,7 @@ function requireProjectAutomation(
   args: { projectId: string; automationId: string },
 ): AutomationRow {
   const automation = getAutomationForProject(db, args);
-  if (!automation) throw new Error("Automation not found");
+  if (!automation) throw new Error("Loop not found");
   return automation;
 }
 
@@ -134,7 +141,7 @@ function assertNotRecursiveCreation(
 ): void {
   if (createdByThreadId === undefined) return;
   if (isAutomationSpawnedThread(db, createdByThreadId)) {
-    throw new Error("Automation-spawned threads cannot create automations");
+    throw new Error("Loop-spawned threads cannot create loops");
   }
 }
 
@@ -278,10 +285,10 @@ function automationWriteError(
 ): Error {
   return problem === "missing-agent-prompt"
     ? new Error(
-        `Automation "${row.name}" requires a prompt before ${MISSING_PROMPT_OPERATION[operation]}. Edit it and add a prompt first.`,
+        `Loop "${row.name}" requires a prompt before ${MISSING_PROMPT_OPERATION[operation]}. Edit it and add a prompt first.`,
       )
     : new Error(
-        `Automation "${row.name}" has invalid stored data and cannot be ${INVALID_DATA_OPERATION[operation]}. Delete it and recreate it.`,
+        `Loop "${row.name}" has invalid stored data and cannot be ${INVALID_DATA_OPERATION[operation]}. Delete it and recreate it.`,
       );
 }
 
@@ -693,7 +700,7 @@ export function createAutomationService(args: {
           automationId: current.id,
           scriptFile: stagedScriptFile,
         });
-        throw new Error("Automation not found");
+        throw new Error("Loop not found");
       }
       if (patch.execution !== undefined) {
         await cleanupSupersededScript({
@@ -731,7 +738,7 @@ export function createAutomationService(args: {
         enabled: false,
         nextRunAt: null,
       });
-      if (!updated) throw new Error("Automation not found");
+      if (!updated) throw new Error("Loop not found");
       publishAutomationChange(bb, input.projectId, "automations-changed");
       return toStoredAutomationResponse(pluginDataDir, updated);
     },
@@ -754,7 +761,7 @@ export function createAutomationService(args: {
         lastError: null,
         resetConsecutiveFailures: true,
       });
-      if (!updated) throw new Error("Automation not found");
+      if (!updated) throw new Error("Loop not found");
       publishAutomationChange(bb, input.projectId, "automations-changed");
       return toStoredAutomationResponse(pluginDataDir, updated);
     },
@@ -833,6 +840,32 @@ export function createAutomationService(args: {
         nextCursor:
           hasMore && last ? encodeRunCursor(last.startedAt, last.id) : null,
       });
+    },
+
+    review() {
+      return buildReview(bb, db);
+    },
+
+    markReviewed(input) {
+      setReviewed(db, { ...input, now: Date.now() });
+      publishAutomationChange(
+        bb,
+        REVIEW_SIGNAL_PROJECT,
+        "automation-runs-changed",
+      );
+      return { ok: true };
+    },
+
+    linkThread(input) {
+      const automation = linkRunThread(db, { ...input, now: Date.now() });
+      if (automation) {
+        publishAutomationChange(
+          bb,
+          automation.projectId,
+          "automation-runs-changed",
+        );
+      }
+      return { linked: automation !== null };
     },
   };
 }

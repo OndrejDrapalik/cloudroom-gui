@@ -448,3 +448,55 @@ export const automationsOverviewResponseSchema = z
 export type AutomationsOverviewResponse = z.infer<
   typeof automationsOverviewResponseSchema
 >;
+
+export const reviewItemStatusSchema = z.enum([
+  "running",
+  "needs-you",
+  "done",
+  "failed",
+]);
+export type ReviewItemStatus = z.infer<typeof reviewItemStatusSchema>;
+
+export const reviewItemSchema = z
+  .object({
+    id: z.string(),
+    at: z.number(),
+    loop: z
+      .object({
+        id: z.string().nullable(),
+        name: z.string(),
+        projectId: z.string(),
+        projectName: z.string(),
+        cloud: z.boolean(),
+      })
+      .strict(),
+    status: reviewItemStatusSchema,
+    title: z.string(),
+    report: z.string().nullable(),
+    threadId: z.string().nullable(),
+    reviewedAt: z.number().nullable(),
+  })
+  .strict();
+export type ReviewItem = z.infer<typeof reviewItemSchema>;
+
+export const reviewResponseSchema = z
+  .object({
+    items: z.array(reviewItemSchema),
+    toReview: z.number().int().min(0),
+  })
+  .strict();
+export type ReviewResponse = z.infer<typeof reviewResponseSchema>;
+
+export const reviewMarkInputSchema = z
+  .object({
+    itemIds: z.array(z.string().min(1).max(200)).min(1).max(500),
+    reviewed: z.boolean(),
+  })
+  .strict();
+
+export const linkThreadInputSchema = z
+  .object({
+    runId: z.string().min(1).max(100),
+    threadId: z.string().min(1).max(100),
+  })
+  .strict();

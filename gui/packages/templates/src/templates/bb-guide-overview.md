@@ -50,4 +50,4 @@ Run `room-cli guide <chapter>` for command details:
                        notifications
   plugins              Installing plugins, plugin marketplaces, and their
                        contributed cloudroom commands
-  automations          Scheduling and editing recurring or one-shot work
+  automations          Loops: scheduling, editing, and reviewing recurring or one-shot work

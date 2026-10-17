@@ -90,11 +90,17 @@ import {
 } from "./server-target.js";
 import { openServerUrlDialog } from "./server-url-dialog.js";
 import {
-  createConnectServerSync,
-  type ConnectAccountServer,
-  type ConnectServerSync,
-  type ConnectServerSyncSkipReason,
-} from "./connect-server-sync.js";
+  computerName,
+  createComputersSync,
+  fetchRelayCredential,
+  isRelayUrl,
+  listComputers,
+  openComputer,
+  RELAY_CREDENTIAL_FILE_NAME,
+  type ComputerList,
+  type ComputersFailure,
+  type ComputersSync,
+} from "./computers.js";
 import {
   createCredentialCookieSource,
   createLocalServerCookieSource,
@@ -181,6 +187,7 @@ import {
   BB_DESKTOP_GET_WINDOW_STATE_CHANNEL,
   BB_DESKTOP_OPEN_LINK_CHANNEL,
   BB_DESKTOP_OPEN_NEW_TAB_CHANNEL,
+  BB_DESKTOP_OPEN_COMPUTER_CHANNEL,
   BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL,
   BB_DESKTOP_WINDOW_STATE_CHANGED_CHANNEL,
   CLOSE_WINDOW_REQUEST_TIMEOUT_MS,
@@ -363,14 +370,19 @@ let startupRetryPending = false;
 let stoppingForQuit = false;
 let quitting = false;
 let serverTargetStore: ServerTargetStore | null = null;
-let connectServerSync: ConnectServerSync | null = null;
+let computersSync: ComputersSync | null = null;
 let connectCredentialCache: ConnectCredentialCache | null = null;
 let cachedConnectCredential: ConnectCredential | null = null;
 let enrollingDesktopMachine: Promise<void> | null = null;
 let connectSessionRenewal: ConnectSessionRenewal | null = null;
 let serverTargetGeneration = 0;
-let connectAccountServers: ConnectAccountServer[] = [];
-let connectServerSyncSkipReason: ConnectServerSyncSkipReason | null = null;
+let computerList: ComputerList | null = null;
+let computersSkipReason: ComputersFailure | null = null;
+let relayCredentialCache: ConnectCredentialCache | null = null;
+let relayCredential: ConnectCredential | null = null;
+// Set while this Mac stands in for the chosen Mac because it was offline at launch.
+let computerFallback: { handle: string; name: string; back: boolean } | null = null;
+let thisComputerName = "This Mac";
 let builtinServerUrl: string = DEFAULT_BB_SERVER_URL;
 let desktopBridgePath: string | null = null;
 let desktopUserDataPath: string | null = null;
@@ -479,7 +491,26 @@ function getCurrentDesktopInfo(): BbDesktopInfo | null {
   }
   return {
     ...info,
+    computers: describeComputers(),
     serverDaemonLogsAvailable: shouldEnableServerDaemonLogsMenu(),
+  };
+}
+
+function describeComputers(): BbDesktopInfo["computers"] {
+  const target = serverTargetStore?.getTarget();
+  const viewing =
+    computerFallback === null && target?.kind === "connect" && isRelayUrl(target.server.url)
+      ? target.server.handle
+      : null;
+  return {
+    list: (computerList?.computers ?? []).map((computer) => ({
+      handle: computer.handle,
+      name: computer.name,
+      online: computer.live,
+      self: computer.handle === computerList?.selfHandle,
+    })),
+    viewing,
+    fallback: computerFallback && { ...computerFallback },
   };
 }
 
@@ -563,6 +594,13 @@ function sendDesktopWindowStateChanged(
 }
 
 const hideWindowsForTests = process.env.BB_DESKTOP_HIDE_WINDOWS === "1";
+
+// Linux launchers can exit and close the pipe behind stdout/stderr. The next
+// log write then fails (EPIPE) and Electron shows a crash dialog. Logs are
+// best-effort, so drop them instead.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", () => {});
+}
 
 const desktopLogger: DesktopAutoUpdateLogger = {
   error(message) {
@@ -691,11 +729,9 @@ function connectServerMenuId(handle: string): string {
 }
 
 function listMenuConnectServers(): ConnectServerRef[] {
-  const servers: ConnectServerRef[] = connectAccountServers.map((server) => ({
-    handle: server.handle,
-    name: server.name,
-    url: server.url,
-  }));
+  const servers: ConnectServerRef[] = (computerList?.computers ?? [])
+    .filter((computer) => computer.handle !== computerList?.selfHandle)
+    .map(({ handle, name, url }) => ({ handle, name, url }));
   const selected = serverTargetStore?.getConnectServer() ?? null;
   if (
     selected !== null &&
@@ -743,7 +779,7 @@ function refreshApplicationMenu(): void {
   installApplicationMenu({
     accelerators: currentApplicationMenuAccelerators,
     connectServersSkipReason:
-      connectServers.length === 0 ? connectServerSyncSkipReason : null,
+      connectServers.length === 0 ? computersSkipReason : null,
     isLinux: process.platform === "linux",
     isMac: process.platform === "darwin",
     createNewWindow() {
@@ -845,7 +881,7 @@ function refreshApplicationMenu(): void {
       void openSetServerUrlDialog();
     },
     onServerMenuWillShow() {
-      connectServerSync?.onListRequested();
+      computersSync?.onListRequested();
     },
     serverDaemonLogsMenuEnabled: shouldEnableServerDaemonLogsMenu(),
     servers: buildMenuServerItems(connectServers),
@@ -857,7 +893,7 @@ function setCurrentRuntime(runtime: DesktopRuntime | null): void {
   if (runtime === null) {
     stopSystemConfigSync();
   } else {
-    connectServerSync?.onRuntimeReady();
+    computersSync?.onRuntimeReady();
   }
   refreshApplicationMenu();
   if (runtime?.ownership !== "spawned") {
@@ -1246,8 +1282,24 @@ async function applyServerTarget(): Promise<void> {
   serverTargetGeneration += 1;
   const generation = serverTargetGeneration;
   const isCurrent = (): boolean => serverTargetGeneration === generation;
+  setComputerFallback(null);
 
-  if (target.kind === "builtin") {
+  // Your other Mac on cloudroom.run. If it doesn't answer, use this Mac until it's back.
+  if (target.kind === "connect" && isRelayUrl(target.server.url)) {
+    if (await openRelayComputer(target.server.handle, isCurrent)) {
+      refreshApplicationMenu();
+      return;
+    }
+    if (!isCurrent()) {
+      return;
+    }
+    desktopLogger.info(
+      `[desktop] ${target.server.name} did not answer — opening ${BUILTIN_SERVER_NAME} instead`,
+    );
+    setComputerFallback({ handle: target.server.handle, name: target.server.name, back: false });
+  }
+
+  if (target.kind === "builtin" || computerFallback !== null) {
     const attached = await ensureBuiltinRuntimeAttached();
     if (!isCurrent()) {
       return;
@@ -1312,6 +1364,55 @@ async function applyServerTarget(): Promise<void> {
     }
   }
   refreshApplicationMenu();
+}
+
+function setComputerFallback(fallback: typeof computerFallback): void {
+  if (fallback === null && computerFallback === null) return;
+  computerFallback = fallback;
+  computersSync?.setFallback(fallback !== null);
+  desktopBrowserBrokerClient?.reconnect();
+  sendDesktopInfoChanged();
+}
+
+async function getRelayCredential(startLocal: boolean): Promise<ConnectCredential | null> {
+  if (relayCredential !== null) return relayCredential;
+  if (currentRuntime === null && startLocal) await ensureBuiltinRuntimeAttached();
+  if (currentRuntime === null) return null;
+  relayCredential = await fetchRelayCredential(currentRuntime.serverUrl);
+  if (relayCredential !== null) await relayCredentialCache?.write(relayCredential);
+  return relayCredential;
+}
+
+async function clearRelayCredential(): Promise<void> {
+  relayCredential = null;
+  await relayCredentialCache?.clear();
+}
+
+async function openRelayComputer(handle: string, isCurrent: () => boolean): Promise<boolean> {
+  // A second try covers a key the Connect plugin replaced since this app saved it.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const credential = await getRelayCredential(true);
+    if (credential === null || !isCurrent()) return false;
+    const opened = await openComputer(credential, handle, session.defaultSession.cookies);
+    if (opened.ok) return isCurrent() && (await loadRemoteServerTarget(opened.value, isCurrent));
+    desktopLogger.info(`[desktop] could not open Mac ${handle} (${opened.reason})`);
+    if (opened.reason !== "unauthorized") return false;
+    await clearRelayCredential();
+  }
+  return false;
+}
+
+/** Opens one of your Macs in this window; null or this Mac's handle means this Mac. */
+async function openComputerTarget(handle: string | null): Promise<void> {
+  if (serverTargetStore === null) return;
+  if (handle === null || handle === computerList?.selfHandle) {
+    await serverTargetStore.setTarget("builtin");
+  } else {
+    const computer = listMenuConnectServers().find((candidate) => candidate.handle === handle);
+    if (computer === undefined) return;
+    await serverTargetStore.setConnectServer(computer);
+  }
+  await applyServerTarget();
 }
 
 async function loadRemoteServerTarget(
@@ -1741,6 +1842,9 @@ function registerDesktopUpdateIpc(): void {
   });
   ipcMain.handle(BB_DESKTOP_OPEN_SERVER_DAEMON_LOGS_CHANNEL, async () => {
     await openServerDaemonLogs();
+  });
+  ipcMain.handle(BB_DESKTOP_OPEN_COMPUTER_CHANNEL, async (_event, handle: unknown) => {
+    await openComputerTarget(typeof handle === "string" ? handle : null);
   });
   ipcMain.handle(BB_DESKTOP_CHECK_FOR_UPDATES_CHANNEL, async () => {
     await Promise.all([
@@ -2358,37 +2462,48 @@ async function runDesktopApp(): Promise<void> {
     userDataPath,
   });
   cachedConnectCredential = await connectCredentialCache.read();
-  connectServerSync = createConnectServerSync({
-    getCredential: () => cachedConnectCredential,
-    getLocalServerUrl: () => currentRuntime?.serverUrl ?? null,
-    onUnauthorized() {
-      void clearCachedConnectCredential();
+  relayCredentialCache = createConnectCredentialCache({
+    encryption: safeStorage,
+    fileName: RELAY_CREDENTIAL_FILE_NAME,
+    userDataPath,
+  });
+  relayCredential = await relayCredentialCache.read();
+  thisComputerName = await computerName();
+  computersSync = createComputersSync({
+    async fetchList() {
+      const credential = await getRelayCredential(false);
+      if (credential === null) return { ok: false, reason: "no-credential" };
+      const result = await listComputers(credential, thisComputerName);
+      if (!result.ok && result.reason === "unauthorized") await clearRelayCredential();
+      return result;
     },
-    onSkipped(reason) {
-      connectServerSyncSkipReason = reason;
-      refreshApplicationMenu();
-    },
-    onServers(servers) {
-      connectAccountServers = servers;
-      connectServerSyncSkipReason = null;
-      const selected = serverTargetStore?.getConnectServer() ?? null;
-      const synced = servers.find(
-        (server) => server.handle === selected?.handle,
-      );
-      if (synced !== undefined) {
-        void serverTargetStore?.refreshConnectServer({
-          handle: synced.handle,
-          name: synced.name,
-          url: synced.url,
-        });
+    onResult(result) {
+      computersSkipReason = result.ok ? null : result.reason;
+      if (result.ok) {
+        computerList = result.value;
+        const selected = serverTargetStore?.getConnectServer() ?? null;
+        const synced = result.value.computers.find(
+          (computer) => computer.handle === selected?.handle,
+        );
+        if (synced !== undefined) {
+          void serverTargetStore?.refreshConnectServer({
+            handle: synced.handle,
+            name: synced.name,
+            url: synced.url,
+          });
+        }
+        const fallback = computerFallback;
+        if (fallback !== null && !fallback.back) {
+          const back = result.value.computers.some(
+            (computer) => computer.handle === fallback.handle && computer.live,
+          );
+          if (back) computerFallback = { ...fallback, back };
+        }
       }
       refreshApplicationMenu();
-    },
-    log: (message) => {
-      desktopLogger.info(`[desktop] ${message}`);
+      sendDesktopInfoChanged();
     },
   });
-  connectServerSync.start();
   connectSessionRenewal = createConnectSessionRenewal({
     async authenticate(remoteServerUrl, isCurrent) {
       const result = await authenticateConnectTarget(
@@ -2586,7 +2701,7 @@ async function runDesktopApp(): Promise<void> {
     homeDir: homedir(),
     getServerUrl() {
       const target = serverTargetStore?.getTarget();
-      if (target?.kind === "connect") return target.server.url;
+      if (target?.kind === "connect" && computerFallback === null) return target.server.url;
       if (target?.kind === "custom") return target.url;
       return currentRuntime?.serverUrl ?? builtinServerUrl;
     },
@@ -2653,7 +2768,7 @@ async function runDesktopApp(): Promise<void> {
     await initializeRuntime({ bridgePath, serverUrl, userDataPath });
   } else {
     await applyServerTarget();
-    connectServerSync.syncNow().catch(() => {});
+    computersSync.syncNow().catch(() => {});
   }
 }
 

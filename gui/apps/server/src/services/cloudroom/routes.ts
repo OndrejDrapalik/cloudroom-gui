@@ -321,7 +321,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     if (problem) return context.json({ message: "Use the local Cloudroom app." }, problem.status);
     const input = z.object({ requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/), token: z.string().regex(/^sk-ant-oat[A-Za-z0-9_-]{20,}$/), plan: z.string().regex(/^[a-z_]{1,32}$/).optional() }).strict().parse(await context.req.json());
     const status = await cloudroom(deps).claudeAuth("token", input.requestId, input.token, input.plan);
-    cloudroom(deps).restartAwakeClaude();
+    cloudroom(deps).restartAwake("claude-code");
     return context.json(status);
   });
   app.post("/api/v1/cloudroom/account/claude/key", async context => {
@@ -352,6 +352,22 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     return context.json(await cloudroom(deps).piApiKey(parsed.data.provider, parsed.data.apiKey));
   });
   app.get("/api/v1/cloudroom/account/codex", async context => context.json(await cloudroom(deps).codexAuth()));
+  // The Accounts plugin's Codex accounts (ADR 0195). Responses never hold tokens.
+  app.post("/api/v1/cloudroom/account/codex-accounts", async context => {
+    const problem = browserRequestProblem(context, deps, { requireJsonForMutation: true });
+    if (problem) return context.json({ message: "Use the local Cloudroom app." }, problem.status);
+    const id = z.string().min(1).max(100);
+    const parsed = z.discriminatedUnion("action", [
+      z.object({ action: z.enum(["list", "start"]) }).strict(),
+      z.object({ action: z.literal("poll"), sessionId: id }).strict(),
+      z.object({ action: z.literal("use"), id: id.nullable() }).strict(),
+      z.object({ action: z.literal("remove"), id }).strict(),
+      z.object({ action: z.literal("rename"), id, name: z.string().max(60) }).strict(),
+      z.object({ action: z.literal("move"), id, direction: z.enum(["up", "down"]) }).strict(),
+    ]).safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) throw new ApiError(400, "invalid_codex_accounts", "Invalid Codex accounts request.");
+    return context.json(await cloudroom(deps).codexAccounts.request(parsed.data));
+  });
   for (const action of ["login", "cancel"] as const) {
     app.post(`/api/v1/cloudroom/account/codex/${action}`, async context => {
       const input = z.object({ requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/) }).strict().parse(await context.req.json());

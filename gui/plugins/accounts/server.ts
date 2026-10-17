@@ -10,12 +10,10 @@ import {
   localClaudeEmail,
 } from "./src/claude.js";
 import {
-  CodexLogin,
-  codexAccountId,
-  codexPlan,
-  codexUsage,
+  codexListSchema,
+  codexPollSchema,
+  codexStartSchema,
   localCodexEmail,
-  refreshCodex,
 } from "./src/codex.js";
 import {
   ACCOUNTS_CHANGED,
@@ -29,9 +27,7 @@ import {
 } from "./src/contract.js";
 import { SignInAgainError, type Secret, type SignedIn } from "./src/tokens.js";
 
-const PROVIDERS = providerSchema.options;
 const USAGE_EVERY_MS = 5 * 60_000;
-const REFRESH_EARLY_MS = 2 * 60 * 60_000;
 const DEFAULT_REST_MS = 60 * 60_000;
 
 const storedSchema = z.object({
@@ -78,13 +74,24 @@ export default async function plugin(bb: BbPluginApi) {
     "secrets",
   );
   await fs.mkdir(secretsDir, { recursive: true, mode: 0o700 });
+  const secretPath = (id: string) => path.join(secretsDir, `${id}.json`);
   let accounts = z
     .array(storedSchema)
     .catch([])
     .parse(await kv.get("accounts:v1"));
-  const order: Record<Provider, string[]> = z
-    .object({ "claude-code": z.array(z.string()), codex: z.array(z.string()) })
-    .catch({ "claude-code": [LOCAL], codex: [LOCAL] })
+  // Codex accounts moved to the website, which renews them for Local and Cloud threads (ADR 0195). The ones this Mac
+  // kept sign in again (docs/scopes/multiple-subscriptions.md, decision 14).
+  const moved = accounts.filter((account) => account.provider === "codex");
+  if (moved.length > 0) {
+    accounts = accounts.filter((account) => account.provider !== "codex");
+    await Promise.all(
+      moved.map((account) => fs.rm(secretPath(account.id), { force: true })),
+    );
+    await kv.set("accounts:v1", accounts);
+  }
+  const order = z
+    .object({ "claude-code": z.array(z.string()) })
+    .catch({ "claude-code": [LOCAL] })
     .parse(await kv.get("order:v1"));
   const limits = z
     .record(z.string(), z.number())
@@ -93,10 +100,10 @@ export default async function plugin(bb: BbPluginApi) {
   let inCloud = z.string().nullable().catch(null).parse(await kv.get("cloud:v1"));
   const usage = new Map<string, Usage>();
   const threadAccount = new Map<string, string>();
-  const refreshing = new Map<string, Promise<Secret>>();
   const claudeLogin = new ClaudeLogin();
-  const codexLogin = new CodexLogin();
   const macSignIns = new Set<string>();
+  let codexInUse = LOCAL;
+  let codexAccounts = 0;
 
   const changed = async () => {
     await Promise.all([
@@ -107,70 +114,45 @@ export default async function plugin(bb: BbPluginApi) {
     bb.realtime.publish(ACCOUNTS_CHANGED, {});
     void followInCloud();
   };
-  const ids = (provider: Provider): string[] => {
-    const saved = accounts
-      .filter((account) => account.provider === provider)
-      .map((account) => account.id);
-    const kept = order[provider].filter(
+  const ids = (): string[] => {
+    const saved = accounts.map((account) => account.id);
+    const kept = order["claude-code"].filter(
       (id) => id === LOCAL || saved.includes(id),
     );
-    order[provider] = [
+    order["claude-code"] = [
       ...(kept.includes(LOCAL) ? [] : [LOCAL]),
       ...kept,
       ...saved.filter((id) => !kept.includes(id)),
     ];
     // Claude's own Mac login has no one-year token, so Cloud can't follow it (ADR 0197).
-    return provider === "claude-code" && saved.length > 0
-      ? order[provider].filter((id) => id !== LOCAL)
-      : order[provider];
+    return saved.length > 0
+      ? order["claude-code"].filter((id) => id !== LOCAL)
+      : order["claude-code"];
   };
   // The top account is the one every thread uses (ADR 0197).
-  const current = (provider: Provider): string => ids(provider)[0] ?? LOCAL;
+  const current = (provider: Provider): string =>
+    provider === "codex" ? codexInUse : (ids()[0] ?? LOCAL);
   const limitedUntil = (provider: Provider, id: string): number | null => {
     const until = limits[`${provider}:${id}`];
     return until !== undefined && until > Date.now() ? until : null;
   };
 
-  const secretPath = (id: string) => path.join(secretsDir, `${id}.json`);
   const writeSecret = async (id: string, secret: Secret) => {
     const temp = `${secretPath(id)}.${randomUUID()}.tmp`;
     await fs.writeFile(temp, JSON.stringify(secret), { mode: 0o600 });
     await fs.rename(temp, secretPath(id));
   };
-  const freshSecret = (account: Stored): Promise<Secret> => {
-    const running = refreshing.get(account.id);
-    if (running) return running;
-    const flight = (async () => {
-      const secret = secretSchema.parse(
-        JSON.parse(await fs.readFile(secretPath(account.id), "utf8")),
-      );
-      const lifetime =
-        secret.expiresAt !== null && secret.issuedAt !== undefined
-          ? secret.expiresAt - secret.issuedAt
-          : Infinity;
-      if (
-        account.provider === "claude-code" ||
-        secret.expiresAt === null ||
-        secret.expiresAt - Date.now() > Math.min(REFRESH_EARLY_MS, lifetime / 2)
-      )
-        return secret;
-      const next = {
-        ...(await refreshCodex(secret)),
-        issuedAt: Date.now(),
-      };
-      await writeSecret(account.id, next);
-      return next;
-    })().finally(() => refreshing.delete(account.id));
-    refreshing.set(account.id, flight);
-    return flight;
-  };
+  const readSecret = async (account: Stored): Promise<Secret> =>
+    secretSchema.parse(
+      JSON.parse(await fs.readFile(secretPath(account.id), "utf8")),
+    );
   // Cloud keeps one Claude login per user, so it follows the account in use (ADR 0197).
   const followInCloud = async () => {
     const id = current("claude-code");
     const account = accounts.find((entry) => entry.id === id);
     if (!account || id === inCloud) return;
     try {
-      const secret = await freshSecret(account);
+      const secret = await readSecret(account);
       await bb.sdk.cloudroom.claudeAuth({
         action: "token",
         requestId: randomUUID(),
@@ -189,26 +171,14 @@ export default async function plugin(bb: BbPluginApi) {
   const refreshUsage = async (account: Stored, force = false) => {
     const previous = usage.get(account.id);
     if (!force && previous && Date.now() - previous.at < USAGE_EVERY_MS) return;
-    const before = [account.plan, previous?.error].join();
+    const before = previous?.error ?? null;
     try {
-      const secret = await freshSecret(account);
-      if (account.provider === "claude-code") {
-        usage.set(account.id, {
-          windows: await claudeUsage(secret),
-          error: null,
-          signInAgain: false,
-          at: Date.now(),
-        });
-      } else {
-        const measured = await codexUsage(secret);
-        account.plan = measured.plan ?? account.plan;
-        usage.set(account.id, {
-          windows: measured.windows,
-          error: null,
-          signInAgain: false,
-          at: Date.now(),
-        });
-      }
+      usage.set(account.id, {
+        windows: await claudeUsage(await readSecret(account)),
+        error: null,
+        signInAgain: false,
+        at: Date.now(),
+      });
     } catch (error) {
       usage.set(account.id, {
         windows: previous?.windows ?? [],
@@ -217,19 +187,14 @@ export default async function plugin(bb: BbPluginApi) {
         at: Date.now(),
       });
     }
-    if ([account.plan, usage.get(account.id)?.error].join() !== before)
-      await changed();
+    if ((usage.get(account.id)?.error ?? null) !== before) await changed();
   };
   // A Claude check is a real 1-token reply that can open a 5-hour window,
   // so only the account in use is checked in the background.
   const refreshAll = (force = false) =>
     Promise.all(
       accounts
-        .filter(
-          (account) =>
-            account.provider === "codex" ||
-            account.id === current("claude-code"),
-        )
+        .filter((account) => account.id === current("claude-code"))
         .map((account) => refreshUsage(account, force)),
     );
   const timer = setInterval(() => void refreshAll(), USAGE_EVERY_MS);
@@ -237,42 +202,31 @@ export default async function plugin(bb: BbPluginApi) {
   bb.onDispose(() => clearInterval(timer));
   void refreshAll();
 
-  const add = async (provider: Provider, signedIn: SignedIn, use = false) => {
-    const existing = accounts.find(
-      (account) =>
-        account.provider === provider &&
-        signedIn.accountKey !== null &&
-        account.accountKey === signedIn.accountKey,
-    );
-    if (!existing && ids(provider).length >= MAX_ACCOUNTS)
+  const add = async (signedIn: SignedIn, use = false) => {
+    if (ids().length >= MAX_ACCOUNTS)
       throw new Error(
         `You can connect up to ${MAX_ACCOUNTS} accounts per provider.`,
       );
-    const account: Stored = existing ?? {
+    const account: Stored = {
       id: randomUUID(),
-      provider,
-      email: null,
-      plan: null,
+      provider: "claude-code",
+      email: signedIn.email,
+      plan: signedIn.plan,
       accountKey: signedIn.accountKey,
       createdAt: Date.now(),
     };
-    account.email = signedIn.email;
-    account.plan = signedIn.plan;
     await writeSecret(account.id, { ...signedIn.secret, issuedAt: Date.now() });
-    usage.delete(account.id);
-    if (!existing) accounts = [...accounts, account];
-    ids(provider);
-    if (use) move(provider, account.id, 0);
+    accounts = [...accounts, account];
+    ids();
+    if (use) move(account.id, 0);
     await changed();
     void refreshUsage(account, true);
   };
 
-  const view = async (provider: Provider): Promise<AccountView[]> => {
-    const using = current(provider);
-    const localEmail = await (provider === "claude-code"
-      ? localClaudeEmail()
-      : localCodexEmail());
-    const rows: AccountView[] = ids(provider).map((id) => {
+  const claudeView = async (): Promise<AccountView[]> => {
+    const using = current("claude-code");
+    const localEmail = await localClaudeEmail();
+    const rows: AccountView[] = ids().map((id) => {
       const account = accounts.find((entry) => entry.id === id);
       const measured = usage.get(id);
       return {
@@ -281,7 +235,7 @@ export default async function plugin(bb: BbPluginApi) {
         email: id === LOCAL ? localEmail : (account?.email ?? null),
         plan: account?.plan ?? null,
         inUse: id === using,
-        limitedUntil: limitedUntil(provider, id),
+        limitedUntil: limitedUntil("claude-code", id),
         error: measured?.error ?? null,
         // Accounts not in use aren't checked, so a window past its reset shows empty.
         windows: (measured?.windows ?? []).map((window) =>
@@ -293,9 +247,7 @@ export default async function plugin(bb: BbPluginApi) {
       };
     });
     // Keep the Mac's Claude login visible until it is added again (ADR 0197).
-    const macAdded = accounts.some(
-      (entry) => entry.provider === provider && entry.email === localEmail,
-    );
+    const macAdded = accounts.some((entry) => entry.email === localEmail);
     if (localEmail && !rows.some((row) => row.id === LOCAL) && !macAdded)
       rows.unshift({
         id: LOCAL,
@@ -310,45 +262,103 @@ export default async function plugin(bb: BbPluginApi) {
       });
     return rows;
   };
-  const move = (provider: Provider, id: string, to: number) => {
-    const list = ids(provider).filter((entry) => entry !== id);
+  // Codex accounts live on the website (ADR 0195). "This Mac" is the Mac's own `~/.codex` login and stays selectable:
+  // Cloud then uses the copy of it the app uploads, as before.
+  const codexView = async (
+    result?: unknown,
+  ): Promise<AccountView[]> => {
+    const list = codexListSchema.parse(
+      result ?? (await bb.sdk.cloudroom.codexAccounts({ action: "list" })),
+    );
+    const selected = list.accounts.find((account) => account.inUse);
+    codexInUse = selected?.id ?? LOCAL;
+    codexAccounts = list.accounts.length;
+    return [
+      {
+        id: LOCAL,
+        name: null,
+        email: await localCodexEmail(),
+        plan: null,
+        inUse: !selected,
+        limitedUntil: limitedUntil("codex", LOCAL),
+        error: null,
+        windows: [],
+        needsSignIn: false,
+      },
+      ...list.accounts.map((account) => ({
+        ...account,
+        limitedUntil: limitedUntil("codex", account.id),
+        needsSignIn: false,
+      })),
+    ];
+  };
+  const codex = async (
+    input: Parameters<typeof bb.sdk.cloudroom.codexAccounts>[0],
+  ) => {
+    const views = await codexView(await bb.sdk.cloudroom.codexAccounts(input));
+    bb.realtime.publish(ACCOUNTS_CHANGED, {});
+    return views;
+  };
+  const move = (id: string, to: number) => {
+    const list = ids().filter((entry) => entry !== id);
     list.splice(Math.max(0, Math.min(list.length, to)), 0, id);
-    order[provider] = list;
+    order["claude-code"] = list;
+  };
+  const stored = (id: string) => {
+    if (id === LOCAL)
+      throw new Error("This machine's own login can't be changed here.");
+    return id;
   };
 
   bb.rpc.register(
     accountsRpcContract,
     {
-      "accounts.list": ({ provider }) => view(provider),
+      "accounts.list": ({ provider }) =>
+        provider === "codex" ? codexView() : claudeView(),
       "accounts.use": async ({ provider, id }) => {
-        move(provider, id, 0);
         delete limits[`${provider}:${id}`];
+        if (provider === "codex") {
+          await codex({ action: "use", id: id === LOCAL ? null : id });
+          await kv.set("limits:v1", limits);
+          return null;
+        }
+        move(id, 0);
         await changed();
         const account = accounts.find((entry) => entry.id === id);
         if (account) void refreshUsage(account, true);
         return null;
       },
       "accounts.move": async ({ provider, id, direction }) => {
-        move(
-          provider,
-          id,
-          ids(provider).indexOf(id) + (direction === "up" ? -1 : 1),
-        );
+        if (provider === "codex") {
+          await codex({ action: "move", id: stored(id), direction });
+          return null;
+        }
+        move(id, ids().indexOf(id) + (direction === "up" ? -1 : 1));
         await changed();
         return null;
       },
       "accounts.remove": async ({ provider, id }) => {
-        if (id === LOCAL)
-          throw new Error("This machine's own login can't be removed here.");
-        accounts = accounts.filter((account) => account.id !== id);
-        order[provider] = order[provider].filter((entry) => entry !== id);
+        stored(id);
         delete limits[`${provider}:${id}`];
+        if (provider === "codex") {
+          await codex({ action: "remove", id });
+          await kv.set("limits:v1", limits);
+          return null;
+        }
+        accounts = accounts.filter((account) => account.id !== id);
+        order["claude-code"] = order["claude-code"].filter(
+          (entry) => entry !== id,
+        );
         usage.delete(id);
         await fs.rm(secretPath(id), { force: true });
         await changed();
         return null;
       },
-      "accounts.rename": async ({ id, name }) => {
+      "accounts.rename": async ({ provider, id, name }) => {
+        if (provider === "codex") {
+          await codex({ action: "rename", id: stored(id), name });
+          return null;
+        }
         const account = accounts.find((entry) => entry.id === id);
         if (!account) throw new Error("This account is no longer connected.");
         account.name = name.trim() || null;
@@ -367,7 +377,6 @@ export default async function plugin(bb: BbPluginApi) {
           // Signing in the Mac's login again labels it with the Mac's email and selects it.
           const mac = macSignIns.delete(sessionId);
           await add(
-            "claude-code",
             {
               email: mac ? await localClaudeEmail() : null,
               plan: null,
@@ -384,19 +393,17 @@ export default async function plugin(bb: BbPluginApi) {
           };
         }
       },
-      "codex.start": () => codexLogin.start(),
+      "codex.start": async () =>
+        codexStartSchema.parse(
+          await bb.sdk.cloudroom.codexAccounts({ action: "start" }),
+        ),
       "codex.poll": async ({ sessionId }) => {
-        try {
-          const signedIn = await codexLogin.poll(sessionId);
-          if (!signedIn) return { status: "pending" as const, message: null };
-          await add("codex", signedIn);
-          return { status: "complete" as const, message: null };
-        } catch (error) {
-          return {
-            status: "error" as const,
-            message: error instanceof Error ? error.message : String(error),
-          };
-        }
+        const polled = codexPollSchema.parse(
+          await bb.sdk.cloudroom.codexAccounts({ action: "poll", sessionId }),
+        );
+        if (polled.status === "complete")
+          bb.realtime.publish(ACCOUNTS_CHANGED, {});
+        return polled;
       },
     },
     {
@@ -406,44 +413,22 @@ export default async function plugin(bb: BbPluginApi) {
     },
   );
 
-  const contribute =
-    (provider: Provider) => async (context: { threadId: string }) => {
-      const id = current(provider);
+  bb.providers.experimental_contributeEnv(
+    "claude-code",
+    async (context: { threadId: string }) => {
+      const id = current("claude-code");
       threadAccount.set(context.threadId, id);
       const account = accounts.find((entry) => entry.id === id);
       if (!account) return [];
-      const secret = await freshSecret(account).catch(() => null);
+      const secret = await readSecret(account).catch(() => null);
       if (!secret) return [];
       const reason = `Cloudroom account ${account.email ?? account.id}`;
-      if (provider === "claude-code")
-        return [
-          {
-            name: "CLAUDE_CODE_OAUTH_TOKEN",
-            value: secret.accessToken,
-            reason,
-          },
-          { name: "ANTHROPIC_API_KEY", value: "", reason },
-        ];
       return [
-        {
-          name: "CLOUDROOM_CODEX_ACCESS_TOKEN",
-          value: secret.accessToken,
-          reason,
-        },
-        {
-          name: "CLOUDROOM_CODEX_ACCOUNT_ID",
-          value: codexAccountId(secret) ?? account.accountKey ?? "",
-          reason,
-        },
-        {
-          name: "CLOUDROOM_CODEX_PLAN_TYPE",
-          value: codexPlan(secret) ?? "",
-          reason,
-        },
+        { name: "CLAUDE_CODE_OAUTH_TOKEN", value: secret.accessToken, reason },
+        { name: "ANTHROPIC_API_KEY", value: "", reason },
       ];
-    };
-  for (const provider of PROVIDERS)
-    bb.providers.experimental_contributeEnv(provider, contribute(provider));
+    },
+  );
 
   bb.events.on("turn.failed", async (event) => {
     if (event.errorInfo?.category !== "rate-limit") return;
@@ -452,10 +437,11 @@ export default async function plugin(bb: BbPluginApi) {
       .catch(() => null);
     const provider = providerSchema.safeParse(thread?.providerId);
     if (!provider.success) return;
-    // Cloud threads use the selected account, so they have no entry here.
-    const used =
-      threadAccount.get(event.threadId) ?? current(provider.data);
-    if (used === LOCAL && ids(provider.data).length < 2) return;
+    // Cloud threads and Codex use the selected account, so they have no entry here.
+    const used = threadAccount.get(event.threadId) ?? current(provider.data);
+    const several =
+      provider.data === "codex" ? codexAccounts > 0 : ids().length > 1;
+    if (used === LOCAL && !several) return;
     limits[`${provider.data}:${used}`] =
       blockedUntil(event.rateLimits) ?? Date.now() + DEFAULT_REST_MS;
     await changed();

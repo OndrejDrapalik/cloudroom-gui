@@ -12,8 +12,27 @@ const bbDesktopDownloadStateSchema = z.enum([
   "failed",
 ]);
 
+// Your Macs on the same Cloudroom account, and which one this window shows.
+const bbDesktopComputersSchema = z.object({
+  list: z.array(
+    z.object({
+      handle: z.string(),
+      name: z.string(),
+      online: z.boolean(),
+      self: z.boolean(),
+    }),
+  ),
+  /** The Mac on screen, or null for this Mac. */
+  viewing: z.string().nullable(),
+  /** Set while this Mac stands in for the chosen Mac, which was offline. */
+  fallback: z
+    .object({ handle: z.string(), name: z.string(), back: z.boolean() })
+    .nullable(),
+});
+
 export const bbDesktopInfoSchema = z.object({
   autoUpdateEnabled: z.boolean().optional(),
+  computers: bbDesktopComputersSchema.optional(),
   downloadState: bbDesktopDownloadStateSchema.optional(),
   installNeedsPassword: z.boolean().optional(),
   lastCheckedAt: isoUtcDateTimeSchema.nullable(),
@@ -68,6 +87,8 @@ export interface BbDesktopApi extends BbDesktopInfo {
     listener: BbDesktopCloseWindowRequestHandler,
   ): BbDesktopInfoUnsubscribe;
   openExternalUrl(url: string): void;
+  /** Opens one of your Macs in this window; null means this Mac. */
+  openComputer?(handle: string | null): Promise<void>;
   openServerDaemonLogs?(): Promise<void>;
   setTheme(theme: BbDesktopTheme): void;
   setBadgeCount?(count: number): void;

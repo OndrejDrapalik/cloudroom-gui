@@ -336,7 +336,7 @@ describe("editThreadMessage", () => {
           queued.command.threadId === thread.id,
       );
       expect(start.command).toMatchObject({
-        options: { permissionEscalation: "deny" },
+        options: { permissionEscalation: "ask" },
       });
     });
   });

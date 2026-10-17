@@ -952,7 +952,7 @@ describe("Automation detail recipe", () => {
     fireEvent.click(editButton);
 
     const promptContent = screen.getByRole("textbox", {
-      name: "Automation prompt",
+      name: "Loop prompt",
     }) as HTMLTextAreaElement;
     const promptPanel = promptContent.closest("form") as HTMLElement;
     expect(
@@ -1001,7 +1001,7 @@ describe("Automation detail recipe", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
     const reopenedPrompt = screen.getByRole("textbox", {
-      name: "Automation prompt",
+      name: "Loop prompt",
     }) as HTMLTextAreaElement;
     const reopenedPanel = reopenedPrompt.closest("form") as HTMLElement;
     const reopenedModelSelector = reopenedPanel.querySelector(
@@ -1035,9 +1035,7 @@ describe("Automation detail recipe", () => {
     expect(
       await screen.findByRole("textbox", { name: "Saved prompt" }),
     ).toBeTruthy();
-    expect(
-      screen.queryByRole("textbox", { name: "Automation prompt" }),
-    ).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Loop prompt" })).toBeNull();
   });
 
   it("keeps project and environment metadata beside the host picker", () => {

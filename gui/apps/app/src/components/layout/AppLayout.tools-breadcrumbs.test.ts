@@ -83,13 +83,13 @@ describe("resolveToolsBreadcrumbs", () => {
 });
 
 describe("resolveAutomationBreadcrumbs", () => {
-  it("shows only the Automations title on the installed and browse tabs", () => {
+  it("shows only the Loops title on the installed and browse tabs", () => {
     expect(
       resolveAutomationBreadcrumbs("/plugins/automations/automations"),
-    ).toEqual([{ label: "Automations" }]);
+    ).toEqual([{ label: "Loops" }]);
     expect(
       resolveAutomationBreadcrumbs("/plugins/automations/automations/browse"),
-    ).toEqual([{ label: "Automations" }]);
+    ).toEqual([{ label: "Loops" }]);
   });
 
   it("keeps detail ancestors clickable and replaces the loading fallback label", () => {
@@ -98,14 +98,14 @@ describe("resolveAutomationBreadcrumbs", () => {
 
     expect(resolveAutomationBreadcrumbs(detailPath)).toEqual([
       {
-        label: "Automations",
+        label: "Loops",
         to: "/plugins/automations/automations",
       },
       { label: "weekly-review" },
     ]);
     expect(resolveAutomationBreadcrumbs(detailPath, "Weekly review")).toEqual([
       {
-        label: "Automations",
+        label: "Loops",
         to: "/plugins/automations/automations",
       },
       { label: "Weekly review" },
@@ -114,7 +114,7 @@ describe("resolveAutomationBreadcrumbs", () => {
       resolveAutomationBreadcrumbs(`${detailPath}/edit`, "Weekly review"),
     ).toEqual([
       {
-        label: "Automations",
+        label: "Loops",
         to: "/plugins/automations/automations",
       },
       { label: "Weekly review" },

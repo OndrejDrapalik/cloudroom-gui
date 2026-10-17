@@ -59,6 +59,7 @@ class FakeDesktopWindowWebContents implements DesktopWindowWebContents {
     setSpellCheckerEnabled: (enabled) => {
       this.spellCheckerEnabledValues.push(enabled);
     },
+    once: () => {},
   };
   public readonly contextMenuListeners: Parameters<
     DesktopContextMenuWebContents["on"]
@@ -90,6 +91,8 @@ class FakeDesktopWindowWebContents implements DesktopWindowWebContents {
   }
 
   copyImageAt(): void {}
+
+  downloadURL(): void {}
 
   send(): void {}
 

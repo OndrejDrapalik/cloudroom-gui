@@ -87,7 +87,7 @@ describe("PromptBoxActionsMenu", () => {
     expect(menuItems.map((item) => item.textContent)).toEqual([
       "Skills",
       "Plan",
-      "Automation",
+      "Loop",
       "Plugin",
     ]);
     expect(
@@ -108,8 +108,8 @@ describe("PromptBoxActionsMenu", () => {
       providerPlugin,
       {
         kind: "automation",
-        command: { trigger: "/", name: "automation", trailingText: " " },
-        text: "/automation ",
+        command: { trigger: "/", name: "loop", trailingText: " " },
+        text: "/loop ",
       },
     ]);
   });

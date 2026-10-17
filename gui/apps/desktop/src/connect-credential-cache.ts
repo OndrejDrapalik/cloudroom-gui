@@ -21,6 +21,7 @@ export interface ConnectCredentialCacheFs {
 
 interface CreateConnectCredentialCacheArgs {
   encryption: ConnectCredentialEncryption;
+  fileName?: string;
   fs?: ConnectCredentialCacheFs;
   userDataPath: string;
 }
@@ -42,7 +43,7 @@ export function createConnectCredentialCache(
   args: CreateConnectCredentialCacheArgs,
 ): ConnectCredentialCache {
   const fsImpl = args.fs ?? defaultFs;
-  const filePath = join(args.userDataPath, CONNECT_CREDENTIAL_FILE_NAME);
+  const filePath = join(args.userDataPath, args.fileName ?? CONNECT_CREDENTIAL_FILE_NAME);
 
   async function clear(): Promise<void> {
     await fsImpl.rm(filePath, { force: true });

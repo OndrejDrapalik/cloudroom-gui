@@ -197,6 +197,13 @@ export function projectRecord(db: DbConnection, threadId: string, record: Sessio
       if (["failed", "unknown"].includes(receipt.state) && error && !projected.some((event) => event.type === "system/error" && event.message === error.message) && JSON.parse(lastError()?.data ?? "{}").message !== error.message) {
         emit({ type: "system/error", scope: threadScope(), threadId, ...error });
       }
+      // Codex reports its own compaction; other harnesses only confirm it with this receipt.
+      if (receipt.command === "compact" && receipt.state === "completed" && harness !== "codex" && saved.nativeId) {
+        const base = { threadId, providerThreadId: saved.nativeId, scope: turnScope(receipt.request_id) };
+        emit({ ...base, type: "turn/started" });
+        emit({ ...base, type: "thread/compacted" });
+        emit({ ...base, type: "turn/completed", status: "completed" });
+      }
       if (receipt.state === "accepted" && ["stop", "resume"].includes(receipt.command)) {
         saveBinding(tx, threadId, { queuePaused: receipt.command === "stop" });
         if (receipt.command === "stop" && unstartedTurn(tx, threadId)) saveStatus(tx, threadId, "idle");

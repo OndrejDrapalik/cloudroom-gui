@@ -122,6 +122,9 @@ export class TunnelDO {
       this.clientProtocolVersion = 0;
       return new Response(null, { status: 204 });
     }
+    if (url.pathname === "/__control/status") {
+      return Response.json({ online: this.tunnelSocket() !== null });
+    }
     if (
       request.method === "POST" &&
       url.pathname === "/__control/revoke-visitors"

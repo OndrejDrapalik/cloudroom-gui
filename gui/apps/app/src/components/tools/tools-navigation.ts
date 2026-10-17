@@ -82,9 +82,10 @@ export function resolveAutomationBreadcrumbs(
 ): ToolsBreadcrumbSegment[] | null {
   if (
     pathname === AUTOMATIONS_ROUTE_PATH ||
-    pathname === AUTOMATIONS_BROWSE_ROUTE_PATH
+    pathname === AUTOMATIONS_BROWSE_ROUTE_PATH ||
+    pathname === `${AUTOMATIONS_ROUTE_PATH}/review`
   ) {
-    return [{ label: "Automations" }];
+    return [{ label: "Loops" }];
   }
   for (const pattern of [
     AUTOMATION_DETAIL_ROUTE_PATH,
@@ -93,11 +94,11 @@ export function resolveAutomationBreadcrumbs(
     const match = matchPath(pattern, pathname);
     if (!match) continue;
     return [
-      { label: "Automations", to: AUTOMATIONS_ROUTE_PATH },
+      { label: "Loops", to: AUTOMATIONS_ROUTE_PATH },
       {
         label:
           resourceLabel ??
-          routeResourceLabel(match.params.automationId, "Automation"),
+          routeResourceLabel(match.params.automationId, "Loop"),
       },
     ];
   }

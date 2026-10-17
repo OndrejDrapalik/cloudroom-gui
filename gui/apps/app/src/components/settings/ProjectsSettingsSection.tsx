@@ -223,7 +223,7 @@ function HiddenProjectsSection() {
   return (
     <SettingsSection
       title="Hidden projects"
-      description="Hidden from the sidebar. Their threads and automations keep running."
+      description="Hidden from the sidebar. Their threads and loops keep running."
     >
       <SettingsRowList>
         {hiddenProjects.map((project) => (

@@ -220,7 +220,7 @@ describe("application menu", () => {
     expect(note?.enabled).toBe(false);
     expect(note?.type).toBeUndefined();
     expect(note?.click).toBeUndefined();
-    expect(note?.label).toMatch(/sign in to Cloudroom Connect/u);
+    expect(note?.label).toMatch(/sign in to Cloudroom/u);
   });
 
   it("builds a native Linux menu with the Linux DevTools accelerator", () => {

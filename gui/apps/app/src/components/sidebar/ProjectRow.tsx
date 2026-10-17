@@ -132,6 +132,7 @@ export type ProjectThreadListState =
   | {
       status: "ready";
       threads: ThreadListEntry[];
+      pinnedCount?: number;
     }
   | {
       status: "unavailable";
@@ -1404,7 +1405,10 @@ export const ProjectThreadTree = memo(function ProjectThreadTree({
         message={
           threadListState.status === "unavailable"
             ? "Threads unavailable"
-            : "No threads"
+            : threadListState.status === "ready" &&
+                (threadListState.pinnedCount ?? 0) > 0
+              ? "All threads pinned"
+              : "No threads"
         }
         icon={getProjectThreadTreeEmptyStateIcon(variant)}
         className={getProjectThreadTreeEmptyStateClassName(variant)}

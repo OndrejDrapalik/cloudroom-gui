@@ -52,8 +52,8 @@ export function ComposerPlusMenuSlot({
 
 export const AUTOMATION_PROMPT_ACTION: PromptBoxAction = {
   kind: "automation",
-  command: { trigger: "/", name: "automation", trailingText: " " },
-  text: "/automation ",
+  command: { trigger: "/", name: "loop", trailingText: " " },
+  text: "/loop ",
 };
 
 export const CREATE_PLUGIN_PROMPT_ACTION: PromptBoxAction = {
@@ -83,7 +83,7 @@ const PROMPT_ACTION_PRESENTATION = {
     icon: "Target",
   },
   automation: {
-    label: "Automation",
+    label: "Loop",
     icon: "Repeat",
   },
   plugin: {

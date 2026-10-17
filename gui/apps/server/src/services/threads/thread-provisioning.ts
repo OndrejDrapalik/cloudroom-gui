@@ -26,7 +26,6 @@ import {
   hasLiveThreadStartInFlight,
   requestThreadStart,
 } from "./thread-lifecycle.js";
-import { resolvePermissionEscalation } from "./thread-runtime-config.js";
 import { pendingImportFork } from "./thread-fork-history.js";
 import {
   createThreadStartup,
@@ -210,9 +209,7 @@ async function startThreadIfEnvironmentReady(
       : {}),
     requestId: args.context.request.clientRequestId,
     execution: args.context.request.execution,
-    permissionEscalation: resolvePermissionEscalation({
-      initiator: "user",
-    }),
+    permissionEscalation: "ask",
     projectId: args.thread.projectId,
     providerId: args.thread.providerId,
     syncGeneratedTitle: !args.context.request.titleProvided,

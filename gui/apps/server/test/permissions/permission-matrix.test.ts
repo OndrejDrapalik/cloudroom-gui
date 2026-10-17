@@ -3,37 +3,9 @@ import {
   permissionModeValues,
   runtimePermissionPolicySchema,
   runtimePermissionScopeValues,
-  threadTurnInitiatorSchema,
 } from "@cloudroom/domain";
-import type { RuntimePermissionPolicy, ThreadTurnInitiator } from "@cloudroom/domain";
+import type { RuntimePermissionPolicy } from "@cloudroom/domain";
 import { describe, expect, it } from "vitest";
-import { resolvePermissionEscalation } from "../../src/services/threads/thread-runtime-config.js";
-
-const EXPECTED_ESCALATION = {
-  user: "ask",
-  agent: "deny",
-  system: "deny",
-} satisfies Record<ThreadTurnInitiator, "ask" | "deny">;
-
-const threadTurnInitiatorValues = threadTurnInitiatorSchema.options;
-
-describe("permission escalation by turn initiator", () => {
-  it("covers every initiator", () => {
-    expect(threadTurnInitiatorValues).toEqual(["user", "agent", "system"]);
-    expect(Object.keys(EXPECTED_ESCALATION)).toHaveLength(
-      threadTurnInitiatorValues.length,
-    );
-  });
-
-  it.each(threadTurnInitiatorValues.map((initiator) => [initiator] as const))(
-    "%s",
-    (initiator) => {
-      expect(resolvePermissionEscalation({ initiator })).toBe(
-        EXPECTED_ESCALATION[initiator],
-      );
-    },
-  );
-});
 
 const approvalReviewerValues = ["user", "automatic"] as const;
 type ReviewerFromPolicy = NonNullable<

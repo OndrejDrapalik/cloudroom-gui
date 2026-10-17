@@ -77,7 +77,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Register tabs in the panel to the right of its page, beside Cloudroom's own Browser and Terminal tabs",
         ],
         apiSymbols: ["PluginNavPanelRegistration"],
-        firstParty: ["Automations", "Docs", "GitHub", "Tasks"],
+        firstParty: ["Loops", "Docs", "GitHub", "Tasks"],
       },
       {
         id: "thread-row-status",
@@ -628,7 +628,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginCliError",
         ],
         firstParty: [
-          "Automations",
+          "Loops",
           "Custom instructions",
           "Docs",
           "GitHub",
@@ -675,7 +675,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
         apiSymbols: ["PluginBackground", "BbPluginApi.onInstall"],
         firstParty: [
-          "Automations",
+          "Loops",
           "Docs",
           "GitHub",
           "Keep Awake",
@@ -710,7 +710,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "ExperimentalPluginWebSocketHandlers",
         ],
         firstParty: [
-          "Automations",
+          "Loops",
           "Custom instructions",
           "Docs",
           "GitHub",
@@ -744,7 +744,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginTurnFailedEvent",
         ],
         firstParty: [
-          "Automations",
+          "Loops",
           "Provider retry",
           "Push notifications",
           "Tasks",
@@ -984,7 +984,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
         apiSymbols: ["PluginStorage"],
         firstParty: [
-          "Automations",
+          "Loops",
           "Custom instructions",
           "Docs",
           "GitHub",
@@ -1018,7 +1018,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "PluginBrowserBbSdk",
         ],
         firstParty: [
-          "Automations",
+          "Loops",
           "Docs",
           "GitHub",
           "Inline visualizations",
@@ -1146,7 +1146,7 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
         ],
         firstParty: [
           "Ask User Question",
-          "Automations",
+          "Loops",
           "Custom instructions",
           "Docs",
           "GitHub",

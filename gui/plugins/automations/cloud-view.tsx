@@ -4,8 +4,8 @@ import { toast } from "sonner";
 import type { automationRpcContract } from "./src/rpc.js";
 import type { AutomationAgentSummary } from "./src/rpc-types.js";
 
-// Cloud automations (ADR 0212) run on Cloudroom's servers and re-prompt a Cloud thread, even while this Mac is off.
-// Agents create them with `room-cli automation create --cloud`; the Installed list shows, pauses, runs, and deletes them.
+// Cloud loops (ADR 0212) run on Cloudroom's servers and re-prompt a Cloud thread, even while this Mac is off.
+// Agents create them with `room-cli loop create --cloud`; the Overview shows, pauses, runs, and deletes them.
 export type CloudAutomation = {
   id: string;
   thread_id: string;

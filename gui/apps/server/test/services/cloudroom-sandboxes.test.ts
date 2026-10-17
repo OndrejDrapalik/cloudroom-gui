@@ -52,6 +52,7 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
     if (input.action === "awake") return json({ sandboxes: state === "awake" ? [{ thread: sandboxThread, origin: coreUrl, token: "t".repeat(64) }] : [] });
     if (input.action === "wake") { state = "awake"; sandboxThread = input.thread; }
     if (input.action === "archive") state = "archived";
+    else if (state === "archived") return json({ error: "This thread is archived. Restore it to continue.", code: "sandbox_archived" }, 409);
     const view = { thread: input.thread, state, generation: state === "awake" ? 1 : 0, issue: null };
     return json(state === "awake" ? { ...view, origin: coreUrl, token: "t".repeat(64) } : view);
   });
@@ -102,9 +103,13 @@ it("gives each cloud thread its own sandbox, wakes it only for work, and archive
     expect(capture).toHaveBeenCalledWith({ name: "user_message_sent", properties: { execution: "cloud_sandbox", is_child_thread: false, message_source: "thread_create", provider: "codex" } });
     expect(capture).toHaveBeenCalledWith({ name: "user_message_sent", properties: { execution: "cloud_sandbox", is_child_thread: false, message_source: "thread_send", provider: "codex" } });
 
-    // Archive goes to the website, which stops the sandbox even mid-task.
+    // Archive goes to the website, which stops the sandbox even mid-task, so the thread stops showing as running.
+    await waitFor(() => getThread(harness.deps.db, thread.id)?.status === "active", "running follow-up");
     expect((await harness.app.request(`/api/v1/threads/${thread.id}/archive-all`, { method: "POST" })).status).toBeLessThan(300);
     await waitFor(() => website.some(call => call.action === "archive" && call.thread === thread.id), "archive");
+    expect(getThread(harness.deps.db, thread.id)?.status).toBe("idle");
+    // Stopping it afterwards has nothing to do.
+    expect((await request(`/threads/${thread.id}/stop`, {})).status).toBe(200);
   } finally {
     service.stop();
     coreServer.close(); websiteServer.close();

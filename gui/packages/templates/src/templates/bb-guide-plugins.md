@@ -31,16 +31,16 @@ to clear the old startup copy.
 The builtin Accounts plugin is always on. It lets one user connect up to 10
 Claude Code and up to 10 Codex subscriptions. Add them at the top of Settings →
 Agents → Claude Code or Codex; the machine's own CLI login is the first entry
-and is never copied. Every thread uses the top account, and **Use** picks
-another; nothing switches automatically. Once a Claude account is added, the
-machine's own login needs **Add Terminal login** before it can be picked, and Cloud
-Claude follows the account in use.
+and is never copied. Every Local and Cloud thread uses the account in use, and
+**Use** picks another; nothing switches automatically. Once a Claude account is
+added, the machine's own login needs **Add Terminal login** before it can be
+picked. Codex accounts need a Cloudroom sign-in: cloudroom.dev keeps and renews
+them, and this machine gets only access tokens.
 Claude Code receives the account through `CLAUDE_CODE_OAUTH_TOKEN`; Codex signs its
 app server in memory through `chatgptAuthTokens`, so `~/.codex` stays untouched.
-Tokens live in 0600 files in the server data directory and refresh before each
-turn could outlive them. The sidebar usage box flips between accounts with its
-chevrons; **Use** moves one to the top. Plugin RPCs: `accounts.list`,
-`accounts.use`, `accounts.move`, `accounts.remove`.
+The sidebar usage box's account chip switches accounts. Plugin RPCs:
+`accounts.list`, `accounts.use`, `accounts.move`, `accounts.remove`,
+`accounts.rename`.
 
 The builtin Keep Awake plugin prevents macOS idle sleep while Cloudroom is running.
 Its settings page lets you target all hosts or selected hosts. The CLI

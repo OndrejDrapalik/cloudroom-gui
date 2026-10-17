@@ -4185,20 +4185,20 @@ describe("PromptBoxInternal prompt actions", () => {
     const { changes, promptBoxRef } = renderPromptBox("");
 
     await focusPromptEnd(promptBoxRef);
-    await selectPromptAction("Automation");
+    await selectPromptAction("Loop");
 
-    await waitFor(() => expect(latestValue(changes)).toBe("/automation "));
+    await waitFor(() => expect(latestValue(changes)).toBe("/loop "));
     expect(latestChange(changes)?.mentions).toEqual([
       {
         start: 0,
-        end: "/automation".length,
+        end: "/loop".length,
         resource: {
           kind: "command",
           trigger: "/",
-          name: "automation",
+          name: "loop",
           source: "command",
           origin: "user",
-          label: "automation",
+          label: "loop",
           argumentHint: null,
         },
       },
@@ -4285,7 +4285,7 @@ describe("PromptBoxInternal prompt actions", () => {
   it("pastes prompt action command tokens as goal, plan, and automation pills", async () => {
     const { changes, promptBoxRef } = renderPromptBox("");
     const text =
-      "/plan inspect first\n/goal finish the change\n/automation keep checking";
+      "/plan inspect first\n/goal finish the change\n/loop keep checking";
 
     await focusPromptEnd(promptBoxRef);
     pastePlainText(text);
@@ -4320,14 +4320,14 @@ describe("PromptBoxInternal prompt actions", () => {
       },
       {
         start: "/plan inspect first\n/goal finish the change\n".length,
-        end: "/plan inspect first\n/goal finish the change\n/automation".length,
+        end: "/plan inspect first\n/goal finish the change\n/loop".length,
         resource: {
           kind: "command",
           trigger: "/",
-          name: "automation",
+          name: "loop",
           source: "command",
           origin: "user",
-          label: "automation",
+          label: "loop",
           argumentHint: null,
         },
       },
@@ -4356,20 +4356,20 @@ describe("PromptBoxInternal prompt actions", () => {
     await waitFor(() => expect(latestValue(changes)).toBe("/goal "));
     await waitForPromptFocus();
 
-    await selectPromptAction("Automation");
+    await selectPromptAction("Loop");
 
-    await waitFor(() => expect(latestValue(changes)).toBe("/automation "));
+    await waitFor(() => expect(latestValue(changes)).toBe("/loop "));
     expect(latestChange(changes)?.mentions).toEqual([
       {
         start: 0,
-        end: "/automation".length,
+        end: "/loop".length,
         resource: {
           kind: "command",
           trigger: "/",
-          name: "automation",
+          name: "loop",
           source: "command",
           origin: "user",
-          label: "automation",
+          label: "loop",
           argumentHint: null,
         },
       },

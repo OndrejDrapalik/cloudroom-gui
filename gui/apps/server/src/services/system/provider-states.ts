@@ -21,6 +21,7 @@ import { mapProviderMaintenanceRequests } from "./provider-maintenance-concurren
 import { resolvePluginProviderEnvHealth } from "../plugins/plugin-agent-contributions.js";
 import { isSuspendedHostUnavailableError } from "../lib/lifecycle-api-errors.js";
 import { cloudClaudeLoginEnvironment } from "../hosts/host-environment.js";
+import { cloudroom } from "../cloudroom/commands.js";
 
 function unknownProviderState(
   provider: ProviderInfo,
@@ -88,6 +89,19 @@ async function getProviderState(
       providerId: args.provider.id,
       hostId: args.hostId,
     });
+    const codexAccount =
+      args.provider.id === "codex"
+        ? await cloudroom(deps).codexAccounts.selected()
+        : null;
+    if (codexAccount)
+      return {
+        ...health,
+        status: "ready",
+        statusMessage: `Using Codex account ${codexAccount}.`,
+        accountEmail: null,
+        planLabel: null,
+        loginCommand: null,
+      };
     if (contributed === null) {
       const cloud = cloudClaudeLoginEnvironment(deps, {
         hostId: args.hostId,

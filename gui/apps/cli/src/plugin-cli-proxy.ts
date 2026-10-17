@@ -245,11 +245,21 @@ export async function findDisabledPluginForCommand(
   }
 }
 
+const PLUGIN_COMMAND_ALIASES: Readonly<Record<string, string>> = {
+  loop: "automation",
+};
+
 export function findPluginCliCommand(
   contributions: readonly PluginCliContributionEntry[],
   name: string,
 ): PluginCliContributionEntry | undefined {
-  return contributions.find((entry) => entry.name === name);
+  const target = Object.hasOwn(PLUGIN_COMMAND_ALIASES, name)
+    ? PLUGIN_COMMAND_ALIASES[name]
+    : name;
+  return (
+    contributions.find((entry) => entry.name === name) ??
+    contributions.find((entry) => entry.name === target)
+  );
 }
 
 type PluginCliOutputStream = Writable;

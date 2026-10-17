@@ -117,6 +117,7 @@ async function stopThreadRuntime(
     if (
       command.type === "thread.stop" &&
       command.intent === "release" &&
+      !command.immediate &&
       entry.runtime.getActiveTurnId(command.threadId) !== null
     ) {
       await options.eventSink.flush();

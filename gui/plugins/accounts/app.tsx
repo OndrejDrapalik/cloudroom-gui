@@ -20,7 +20,6 @@ import {
   MAX_ACCOUNTS,
   type AccountView,
   type Provider,
-  type UsageWindow,
   type accountsRpcContract,
 } from "./src/contract.js";
 
@@ -39,22 +38,14 @@ function until(timestamp: number): string {
     : `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-function usageText(windows: UsageWindow[]): string | null {
-  if (windows.length === 0) return null;
-  return windows
-    .slice(0, 2)
-    .map((window) => {
-      const label = window.label
-        .replace("Five-hour limit", "5h")
-        .replace("Weekly limit", "7d")
-        .replace("Weekly", "7d");
-      return `${label} ${Math.round(window.usedPercent)}%`;
-    })
-    .join(" · ");
+function windowLabel(label: string): string {
+  return label
+    .replace("Five-hour limit", "5h")
+    .replace("Weekly limit", "7d")
+    .replace("Weekly", "7d");
 }
 
-const tileClass =
-  "flex min-h-32 flex-col gap-2.5 rounded-xl border p-3.5 text-sm";
+const tileClass = "flex min-h-32 flex-col rounded-lg border p-3.5 text-sm";
 
 /** The Mac's own login, before Cloudroom has its own sign-in for it. */
 function TerminalTile({
@@ -70,7 +61,7 @@ function TerminalTile({
       onClick={onSignIn}
       className={cn(
         tileClass,
-        "items-center justify-center border-dashed border-border text-center text-muted-foreground hover:border-primary hover:text-foreground",
+        "items-center justify-center gap-2.5 border-dashed border-border text-center text-muted-foreground hover:border-foreground/50 hover:text-foreground",
       )}
     >
       <Icon name="Terminal" className="size-4" />
@@ -83,14 +74,12 @@ function TerminalTile({
 function AccountTile({
   account,
   index,
-  inUseText,
   onUse,
   onRename,
   onRemove,
 }: {
   account: AccountView;
   index: number;
-  inUseText: string;
   onUse: () => void;
   onRename: (name: string) => void;
   onRemove: () => void;
@@ -101,6 +90,7 @@ function AccountTile({
     account.email ?? (local ? "This Mac" : `Account ${index + 1}`);
   const name = account.name ?? fallback;
   const detail = [
+    account.inUse ? "In use" : "Not in use",
     local && account.email ? "This Mac" : null,
     account.name ? account.email : null,
     account.plan,
@@ -110,34 +100,14 @@ function AccountTile({
   const status = account.limitedUntil
     ? `Limit hit · resets in ${until(account.limitedUntil)}`
     : account.error;
-  const usage = usageText(account.windows);
   return (
     <div
       className={cn(
         tileClass,
-        account.inUse
-          ? "border-primary/55 bg-gradient-to-br from-primary/12 to-transparent"
-          : "border-border bg-muted/20",
+        account.inUse ? "border-foreground/50" : "border-border",
       )}
     >
-      <div className="flex items-center justify-between">
-        <span
-          className={cn(
-            "grid size-8 place-items-center rounded-full text-sm font-semibold",
-            account.inUse
-              ? "bg-primary text-primary-foreground ring-4 ring-primary/20"
-              : "bg-muted text-muted-foreground",
-          )}
-        >
-          {name.charAt(0).toUpperCase()}
-        </span>
-        {account.inUse ? (
-          <span className="grid size-5 place-items-center rounded-full bg-primary text-primary-foreground">
-            <Icon name="Check" className="size-3" />
-          </span>
-        ) : null}
-      </div>
-      <div className="min-w-0">
+      <div className="flex min-h-7 items-center justify-between gap-2">
         {editing ? (
           <input
             autoFocus
@@ -145,7 +115,7 @@ function AccountTile({
             defaultValue={account.name ?? ""}
             placeholder={fallback}
             maxLength={60}
-            className="w-full rounded border border-border bg-transparent px-1.5 py-0.5 text-sm text-foreground outline-none focus:border-primary"
+            className="w-full rounded border border-border bg-transparent px-1.5 py-0.5 text-sm text-foreground outline-none focus:border-foreground/50"
             onKeyDown={(event) => {
               if (event.key === "Escape")
                 event.currentTarget.value = account.name ?? "";
@@ -159,73 +129,75 @@ function AccountTile({
             }}
           />
         ) : (
-          <div className="truncate font-semibold text-foreground" title={name}>
+          <div className="truncate font-medium text-foreground" title={name}>
             {name}
           </div>
         )}
-        {detail ? (
-          <div
-            className="truncate text-xs text-subtle-foreground"
-            title={detail}
-          >
-            {detail}
-          </div>
-        ) : null}
-        <div
-          className={cn(
-            "truncate text-xs",
-            status ? "text-warning-text" : "text-muted-foreground",
-          )}
-          title={status ?? undefined}
-        >
-          {status ?? (account.inUse ? inUseText : "Not in use")}
-          {usage && !status ? ` · ${usage}` : null}
-        </div>
+        {local ? null : (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0 text-muted-foreground"
+                aria-label="Account actions"
+              >
+                <Icon name="MoreHorizontal" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              // Keep focus on the rename field instead of the menu button.
+              onCloseAutoFocus={(event) => event.preventDefault()}
+            >
+              <DropdownMenuItem onSelect={() => setEditing(true)}>
+                <Icon name="Edit" /> Rename
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={onRemove}
+                className="text-destructive-text focus:text-destructive-text"
+              >
+                <Icon name="Trash2" /> Remove
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
-      <div className="mt-auto flex items-center gap-1">
-        {account.inUse ? (
-          <span className="flex items-center gap-1.5 text-xs font-medium text-primary-text">
-            <span className="size-1.5 rounded-full bg-primary ring-2 ring-primary/25" />
-            Active
-          </span>
-        ) : (
-          <Button variant="outline" size="sm" onClick={onUse}>
+      <div className="truncate text-xs text-subtle-foreground" title={detail}>
+        {detail}
+      </div>
+      {status ? (
+        <div className="truncate text-xs text-warning-text" title={status}>
+          {status}
+        </div>
+      ) : null}
+      <div className="mt-auto space-y-1.5 pt-4">
+        {account.windows.slice(0, 2).map((window) => (
+          <div
+            key={window.label}
+            className="flex items-center gap-2 text-xs tabular-nums text-subtle-foreground"
+          >
+            <span className="w-5">{windowLabel(window.label)}</span>
+            <span className="h-[3px] flex-1 bg-border">
+              <span
+                className="block h-full bg-muted-foreground"
+                style={{ width: `${Math.min(100, window.usedPercent)}%` }}
+              />
+            </span>
+            <span className="w-8 text-right">
+              {Math.round(window.usedPercent)}%
+            </span>
+          </div>
+        ))}
+        {account.inUse ? null : (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-1.5"
+            onClick={onUse}
+          >
             Use
           </Button>
-        )}
-        <span className="flex-1" />
-        {local ? null : (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-7 text-muted-foreground"
-              aria-label="Rename account"
-              onClick={() => setEditing(true)}
-            >
-              <Icon name="Edit" />
-            </Button>
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7 text-muted-foreground"
-                  aria-label="Account actions"
-                >
-                  <Icon name="MoreHorizontal" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={onRemove}
-                  className="text-destructive-text focus:text-destructive-text"
-                >
-                  <Icon name="Trash2" /> Remove
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
         )}
       </div>
     </div>
@@ -381,7 +353,7 @@ function AccountsSection({ provider }: { provider: Provider }) {
     load();
   };
 
-  const count = accounts?.length ?? 0;
+  const count = accounts?.filter((account) => account.id !== LOCAL).length ?? 0;
   return (
     <section className="space-y-2.5">
       <div className="flex items-center justify-between gap-4">
@@ -413,11 +385,6 @@ function AccountsSection({ provider }: { provider: Provider }) {
                   key={account.id}
                   account={account}
                   index={index}
-                  inUseText={
-                    provider === "claude-code"
-                      ? "In use by all threads"
-                      : "In use by Local threads"
-                  }
                   onUse={() =>
                     void run(() =>
                       rpc.call("accounts.use", { provider, id: account.id }),
@@ -443,7 +410,7 @@ function AccountsSection({ provider }: { provider: Provider }) {
         </div>
       )}
       {adding ? (
-        <div className="rounded-xl border border-dashed border-border px-3.5">
+        <div className="rounded-lg border border-dashed border-border px-3.5">
           <SignInRow
             provider={provider}
             mac={adding === "mac"}
@@ -456,9 +423,7 @@ function AccountsSection({ provider }: { provider: Provider }) {
         </div>
       ) : null}
       <p className="text-xs text-subtle-foreground">
-        {provider === "claude-code"
-          ? "All Local and Cloud threads use the Active account."
-          : "All Local threads use the Active account."}
+        All Local and Cloud threads use the account in use.
       </p>
       {error ? <p className="text-xs text-destructive-text">{error}</p> : null}
     </section>

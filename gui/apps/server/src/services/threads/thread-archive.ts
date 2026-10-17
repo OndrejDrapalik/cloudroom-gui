@@ -25,6 +25,7 @@ import {
 import { emitPluginThreadArchived } from "../plugins/plugin-thread-events.js";
 import {
   dispatchSettledArchivedThreadProviderArchiveCommand,
+  releaseFailedThreadRuntimeThenArchive,
   requestActiveRuntimeThreadStopIfNeeded,
 } from "./thread-lifecycle.js";
 import { archiveThreadAndReleaseChildren } from "./thread-ownership.js";
@@ -101,16 +102,24 @@ function archiveThreadWithLifecycleEffects(
     emitPluginThreadArchived(archivedThread);
     return archivedThread;
   }
-  if (args.environment !== null) {
-    requestActiveRuntimeThreadStopIfNeeded(
+  if (args.environment !== null && archivedThread.status === "error") {
+    releaseFailedThreadRuntimeThenArchive(
       deps,
-      archivedThread,
+      archivedThread.id,
       args.environment,
     );
+  } else {
+    if (args.environment !== null) {
+      requestActiveRuntimeThreadStopIfNeeded(
+        deps,
+        archivedThread,
+        args.environment,
+      );
+    }
+    dispatchSettledArchivedThreadProviderArchiveCommand(deps, {
+      threadId: archivedThread.id,
+    });
   }
-  dispatchSettledArchivedThreadProviderArchiveCommand(deps, {
-    threadId: archivedThread.id,
-  });
   resetActiveThreadEventPruningState(archivedThread.id);
   pruneThreadEventHistoryBestEffort(deps, {
     mode: "archived",

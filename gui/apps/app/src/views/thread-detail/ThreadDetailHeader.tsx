@@ -175,9 +175,7 @@ export function ThreadDetailHeader({
             className={cn(
               "relative min-w-0 text-xs font-normal text-foreground/70 transition-colors",
               isEditing ? "overflow-visible" : "bb-thread-title",
-              usesDesktopChrome &&
-                threadPurpose !== null &&
-                MACOS_WINDOW_NO_DRAG_CLASS,
+              usesDesktopChrome && MACOS_WINDOW_NO_DRAG_CLASS,
               isSplitPaneHeader &&
                 !isFocused &&
                 dimsInactiveSplits &&

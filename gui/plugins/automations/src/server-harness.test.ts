@@ -33,6 +33,9 @@ const rpcMethods = [
   "automations_resume",
   "automations_run",
   "automations_runs",
+  "automations_review",
+  "automations_review_mark",
+  "automations_link_thread",
   "cloud_automations",
 ].sort();
 
@@ -851,7 +854,7 @@ describe("automations server plugin harness", () => {
       await expect(
         harness.callRpc(method, { projectId: PROJECT_ID, automationId }),
       ).rejects.toThrow(
-        `Automation "Hidden legacy row" requires a prompt before ${operation}. Edit it and add a prompt first.`,
+        `Loop "Hidden legacy row" requires a prompt before ${operation}. Edit it and add a prompt first.`,
       );
     }
     await expect(
@@ -861,7 +864,7 @@ describe("automations server plugin harness", () => {
         name: "Must not be persisted",
       }),
     ).rejects.toThrow(
-      'Automation "Hidden legacy row" requires a prompt before other fields can be updated. Edit it and add a prompt first.',
+      'Loop "Hidden legacy row" requires a prompt before other fields can be updated. Edit it and add a prompt first.',
     );
     await expect(
       harness.callRpc("automations_pause", {
@@ -869,7 +872,7 @@ describe("automations server plugin harness", () => {
         automationId: invalidTarget.id,
       }),
     ).rejects.toThrow(
-      'Automation "Invalid stored row" has invalid stored data and cannot be paused. Delete it and recreate it.',
+      'Loop "Invalid stored row" has invalid stored data and cannot be paused. Delete it and recreate it.',
     );
     await expect(
       harness.callRpc("automations_update", {
@@ -878,7 +881,7 @@ describe("automations server plugin harness", () => {
         name: "Must not be persisted either",
       }),
     ).rejects.toThrow(
-      'Automation "Invalid stored row" has invalid stored data and cannot be updated. Delete it and recreate it.',
+      'Loop "Invalid stored row" has invalid stored data and cannot be updated. Delete it and recreate it.',
     );
     expect(
       database

@@ -29,9 +29,11 @@ import { cliPlace, reportAgentConnect } from "./setup-telemetry.js";
 import { cloudSkills, copyLogins, copyMacGithub, importCodexLogin, importPiLogin, macPiSetup, setupSync, skillInCloud, stopSync, syncStatus } from "./sync.js";
 import { noteWake, setupPreviews, stopPreviews, previewStatus } from "./previews.js";
 import { CloudSecrets } from "./secrets.js";
+import { CodexAccounts } from "./codex-accounts.js";
 import { cancelMacCodexLogin, hasMacCodexLogin, macCodexLogin, macCodexLoginExpired, macCursorLogin, revokeDesktopToken, startMacCodexLogin, SANDBOX_PREFIX, SandboxAsleep, SandboxDirectory, sandboxThread, type AutomationRun, type SandboxProject, type SandboxTrigger, type SandboxWakeTrigger } from "./sandboxes.js";
 import type { AppDeps, LoggedWorkSessionDeps } from "../../types.js";
 import { markMinutesSent, unsentMinutes } from "./time-in-app.js";
+import { emitPluginThreadCreated } from "../plugins/plugin-thread-events.js";
 import type { EditMessageRequest, EditMessageResponse } from "@cloudroom/server-contract";
 
 const accountSchema = z.object({ id: z.string().uuid(), email: z.string().email() }).strict();
@@ -399,6 +401,7 @@ class CloudroomService {
   private sandboxCapabilities: Capabilities | null = null;
   private readonly secrets: CloudSecrets;
   readonly sandboxes: SandboxDirectory;
+  readonly codexAccounts: CodexAccounts;
   constructor(private readonly deps: Deps) {
     this.secrets = new CloudSecrets(deps);
     this.sandboxes = new SandboxDirectory(async () => {
@@ -406,6 +409,8 @@ class CloudroomService {
       return saved?.sandboxToken && saved.account ? { website: saved.websiteUrl ?? HOSTED_WEBSITE, userId: saved.account.id, token: saved.sandboxToken } : null;
     }, thread => void noteWake(deps, thread).catch(() => {}));
     this.sandboxes.onRuns = runs => { for (const run of runs) this.adoptRun(run); };
+    this.codexAccounts = new CodexAccounts(body => this.sandboxes.codexAccounts(body), async () => (await this.sandboxes.account())?.userId ?? null,
+      join(deps.config.dataDir, "cloudroom-codex-accounts.json"), () => this.restartAwake("codex"));
     // Renames, generated titles, agent renames, and new parents (a promoted subagent loses its parent's access) all
     // reach the website. Read after the change's transaction ends.
     deps.hub.onThreadChanged((threadId, changes) => { if (changes.includes("title-changed") || changes.includes("execution-options-changed") || changes.includes("parent-changed")) setImmediate(() => this.syncLabel(threadId)); });
@@ -437,12 +442,13 @@ class CloudroomService {
     const providerId = source && home ? source.providerId : run.harness, model = home?.model ?? run.model;
     if (!providerId || !model || (source && source.projectId !== run.project) || !getProject(this.deps.db, run.project) || getThread(this.deps.db, run.thread)) return;
     const adopted = this.deps.db.transaction(tx => {
-      if (getThread(tx, run.thread) || tx.select().from(cloudroomThreads).where(eq(cloudroomThreads.sessionId, run.session)).get()) return false;
-      createThread(tx, this.deps.hub, { id: run.thread, executionTarget: "cloud", projectId: run.project, providerId, title: run.title, titleFallback: "Automation run", status: "pending" });
+      if (getThread(tx, run.thread) || tx.select().from(cloudroomThreads).where(eq(cloudroomThreads.sessionId, run.session)).get()) return null;
+      const thread = createThread(tx, this.deps.hub, { id: run.thread, executionTarget: "cloud", projectId: run.project, providerId, title: run.title, titleFallback: "Loop run", status: "pending" });
       tx.insert(cloudroomThreads).values({ threadId: run.thread, coreUrl: SANDBOX_PREFIX + run.thread, sessionId: run.session, startRequestId: run.session.replace(/^cr_/, ""), model, reasoning: home?.reasoning ?? "medium" }).run();
-      return true;
+      return thread;
     });
     if (!adopted) return;
+    emitPluginThreadCreated(adopted);
     this.notify(run.thread);
     void this.deliver(run.thread).catch(() => {});
   }
@@ -882,13 +888,13 @@ class CloudroomService {
     return status;
   }
 
-  /** After an Accounts switch, awake Claude sessions restart once idle, so their next message uses the new login (ADR 0197).
+  /** After an Accounts switch, the agent's awake sessions restart once idle, so their next message uses the new login (ADR 0197).
    *  Asleep sandboxes stay asleep; they read the new login when they wake. */
-  restartAwakeClaude(): void {
+  restartAwake(providerId: "claude-code" | "codex"): void {
     for (const saved of bindings(this.deps.db)) {
       const thread = getThread(this.deps.db, saved.threadId);
       const sessionId = saved.sessionId;
-      if (!sessionId || thread?.providerId !== "claude-code" || thread.archivedAt || thread.deletedAt) continue;
+      if (!sessionId || thread?.providerId !== providerId || thread.archivedAt || thread.deletedAt) continue;
       void this.client(saved, false).then(client => client.sleep(sessionId, randomUUID())).catch(() => {});
     }
   }
@@ -1337,8 +1343,8 @@ class CloudroomService {
     const sandbox = sandboxThread(saved.coreUrl);
     if (!sandbox) return;
     const listed = z.object({ automations: z.array(z.object({ session_id: z.string().nullable(), enabled: z.boolean() }).passthrough()) }).safeParse(await this.sandboxes.automations({ action: "list", thread: sandbox }).catch(() => null));
-    if (!listed.success) throw new ApiError(503, "cloudroom_switch", "Couldn't check this thread's automations. Try again in a moment.");
-    if (listed.data.automations.some((automation) => automation.enabled && automation.session_id === saved.sessionId)) throw new ApiError(409, "cloudroom_switch", "This thread has a Cloud automation. Pause or delete it, then switch.");
+    if (!listed.success) throw new ApiError(503, "cloudroom_switch", "Couldn't check this thread's loops. Try again in a moment.");
+    if (listed.data.automations.some((automation) => automation.enabled && automation.session_id === saved.sessionId)) throw new ApiError(409, "cloudroom_switch", "This thread has a Cloud loop. Pause or delete it, then switch.");
   }
 
   /** The old session must be idle, with nothing queued, and fully shown here, so the new agent's history is complete. */
@@ -1437,6 +1443,7 @@ class CloudroomService {
   async control(threadId: string, action: "stop" | "resume"): Promise<void> {
     const saved = binding(this.deps.db, threadId);
     if (!saved) throw new ApiError(409, "cloudroom_missing_binding", "Cloud session is unavailable");
+    if (action === "stop" && getThread(this.deps.db, threadId)?.archivedAt) return;
     await this.client(saved);
     this.enqueue(threadId, randomUUID(), action, {});
     await this.deliver(threadId);
@@ -1449,6 +1456,7 @@ class CloudroomService {
     if (sandbox) {
       // Archive always wins (ADR 0112): the website stops the sandbox even mid-task, once no other thread runs in it.
       this.detach(threadId);
+      if (["active", "stopping"].includes(getThread(this.deps.db, threadId)?.status ?? "")) saveStatus(this.deps.db, threadId, "idle");
       if (!coreInUse(this.deps.db, saved.coreUrl)) void this.sandboxes.archive(sandbox).catch(error => this.warn("The thread's sandbox could not be archived; it sleeps on its own", error, { threadId }));
       // Cloud automations (ADR 0212) stop prompting it. A child shares its parent's sandbox, which stays open.
       if (saved.sessionId) void this.sandboxes.automations({ action: "archived", thread: sandbox, session: saved.sessionId }).catch(error => this.warn("The thread's cloud automations could not be paused", error, { threadId }));
@@ -1669,7 +1677,7 @@ class CloudroomService {
     if (!feature(capabilities, "compact") || harnessProfile(capabilities, thread.providerId)?.compact === false) throw new ApiError(409, "cloudroom_unsupported", "Cloud compaction is not enabled for this harness.");
     if (thread.status !== "idle" && thread.status !== "error") throw new ApiError(409, "invalid_request", "Context can only be compacted while the thread is idle or errored");
     this.enqueue(thread.id, randomUUID(), "compact", {});
-    await this.deliver(thread.id);
+    await this.deliverWhenAwake(thread.id);
   }
 
   /** Goal controls work the same as Local (ADR 0137): pause, resume, replace the objective, or clear. */
@@ -1681,7 +1689,7 @@ class CloudroomService {
       throw new ApiError(409, "cloudroom_unsupported", `Cloud Goal controls need a Codex thread and an updated cloud core (this thread runs ${thread.providerId}).`);
     }
     this.enqueue(thread.id, randomUUID(), "goal", goal);
-    await this.deliver(thread.id);
+    await this.deliverWhenAwake(thread.id);
   }
 
   async editMessage(thread: Thread, payload: EditMessageRequest): Promise<EditMessageResponse> {
@@ -1705,7 +1713,7 @@ class CloudroomService {
       if (saved.queuePaused) this.enqueue(thread.id, `resume_${payload.operationId}`, "resume", {});
       this.enqueue(thread.id, rewindId, "rewind", { before, expected_request_sequence: payload.expectedRequestSequence, replacement });
     }
-    await this.deliver(thread.id);
+    await this.deliverWhenAwake(thread.id);
     if (["failed", "unknown", "unknown_after_restart"].includes(command(this.deps.db, rewindId)?.state ?? "")) throw new ApiError(409, "cloudroom_command_failed", "The rewind failed or its outcome is uncertain. Your original history is preserved.");
     return { ok: true, operationId: payload.operationId, requestSequence: payload.expectedRequestSequence ?? 0 };
   }
@@ -1822,6 +1830,15 @@ class CloudroomService {
     for (const controller of this.streams.values()) controller.abort();
     this.streams.clear();
     this.connectionIssues.clear();
+  }
+
+  /** Compact, rewind and goal wait while Core wakes a sleeping agent; the 1.5 s timer keeps retrying them meanwhile. */
+  private async deliverWhenAwake(threadId: string): Promise<void> {
+    for (const deadline = Date.now() + 60_000; ;) {
+      try { return await this.deliver(threadId); }
+      catch (error) { if (!(error instanceof ApiError && error.body.code === "session_waking") || Date.now() > deadline) throw error; }
+      await new Promise(resolve => setTimeout(resolve, 2_000));
+    }
   }
 
   private deliver(threadId: string): Promise<void> {

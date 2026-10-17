@@ -16,12 +16,14 @@ import type {
   AutomationReadProblem,
   AutomationResponse,
   AutomationsOverviewResponse,
+  ReviewResponse,
 } from "./src/rpc-types.js";
 import { AutomationLifecycleControl } from "./detail-view.js";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { DelayedLoading } from "@cloudroom/shared-ui/delayed-loading";
 import { COARSE_POINTER_ICON_SIZE_SHRINK_CLASS } from "@cloudroom/shared-ui/coarse-pointer-sizing";
 import {
+  ResourceActionButton,
   ResourceBrowseGrid,
   ResourceCollectionPage,
   ResourceCollectionViewport,
@@ -49,13 +51,20 @@ import {
 } from "./lib/format-schedule.js";
 import { AutomationMetadataItem } from "./metadata.js";
 import type { CloudAutomation, CloudAutomationActions } from "./cloud-view.js";
+import {
+  LoopReviewView,
+  reviewableItems,
+  ReviewToolbar,
+  type ReviewFilter,
+  type ReviewLayout,
+} from "./review-view.js";
 
 const AUTOMATION_STATUS_FILTER_OPTIONS = [
   { id: "active", label: "Active" },
   { id: "paused", label: "Paused" },
 ] as const;
 
-export const CREATE_AUTOMATION_PROMPT = "Create a new Cloudroom automation to ";
+export const CREATE_AUTOMATION_PROMPT = "Create a new Cloudroom loop to ";
 export const AUTOMATION_CREATE_TEMPLATES = [
   {
     label: "CI failure triage",
@@ -92,7 +101,15 @@ type AutomationProjectFilter = `project:${string}`;
 type AutomationSortMode = "next" | "project" | "alpha";
 type ProviderList = PluginProvidersState["providers"];
 type AutomationSortDirection = "asc" | "desc";
-export type AutomationCollectionMode = "installed" | "browse";
+export type AutomationCollectionMode = "installed" | "review" | "browse";
+
+export interface LoopReviewState {
+  data: ReviewResponse | null;
+  error: string | null;
+  onRetry: () => void;
+  onOpenThread: (threadId: string) => void;
+  onMark: (itemIds: string[], reviewed: boolean) => void;
+}
 type ReadableOverviewAutomation =
   | AutomationResponse
   | Extract<AutomationReadProblem, { problem: "missing-agent-prompt" }>;
@@ -377,16 +394,57 @@ function AutomationRowMetadata({
   );
 }
 
+function NeedsYouBadge({ count }: { count: number }) {
+  if (count === 0) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 self-center whitespace-nowrap rounded-full bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning-text">
+      <span className="size-1.5 rounded-full bg-warning" aria-hidden />
+      {count} need{count === 1 ? "s" : ""} you
+    </span>
+  );
+}
+
+function LoopStat({
+  label,
+  value,
+  className,
+  onClick,
+}: {
+  label: string;
+  value: ReactNode;
+  className?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={onClick === undefined}
+      onClick={onClick}
+      className="rounded-xl border border-border bg-surface-raised px-4 py-3 text-left transition-colors enabled:cursor-pointer enabled:hover:border-foreground/20"
+    >
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "mt-1 text-2xl font-semibold tabular-nums text-foreground",
+          className,
+        )}
+      >
+        {value}
+      </div>
+    </button>
+  );
+}
+
 function AutomationListRow({
   status,
   name,
   agentLine,
-  cloud,
   schedule,
   nextRun,
   nextRunAt,
   enabled,
   muted,
+  needsYou,
   toggle,
   actions,
   openLabel,
@@ -395,12 +453,12 @@ function AutomationListRow({
   status: AutomationResponse["lastRunStatus"];
   name: string;
   agentLine: ReactNode;
-  cloud: boolean;
   schedule: string;
   nextRun: string;
   nextRunAt: number | null;
   enabled: boolean;
   muted: boolean;
+  needsYou: number;
   toggle: ReactNode;
   actions?: ReactNode;
   openLabel?: string;
@@ -410,47 +468,27 @@ function AutomationListRow({
     <ResourceRow
       leading={<AutomationStatusDot status={status} />}
       title={name}
+      state={<NeedsYouBadge count={needsYou} />}
       description={
-        <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
-          {agentLine}
-        </span>
-      }
-      className="py-3.5"
-      trailingMeta={
-        <span className="flex items-center gap-4 pr-3 text-xs">
-          <span
-            className={cn(
-              "hidden w-20 items-center gap-1.5 md:flex",
-              cloud ? "text-primary" : "text-muted-foreground",
-            )}
-          >
-            <Icon
-              name={cloud ? "Cloud" : "Laptop"}
-              className="size-3.5 shrink-0"
-              aria-hidden
-            />
-            {cloud ? "Cloud" : "Local"}
+        <>
+          <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-muted-foreground/80">
+            {agentLine}
           </span>
-          <span
-            className={cn(
-              "flex items-center gap-4",
-              actions && "group-focus-within:hidden group-hover:hidden",
-            )}
-          >
-            <span
-              className="hidden w-52 truncate text-muted-foreground md:block"
-              title={schedule}
-            >
+          <span className="mt-1 flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 truncate" title={schedule}>
               {schedule}
+            </span>
+            <span aria-hidden className="text-muted-foreground/40">
+              ·
             </span>
             <span
               className={cn(
-                "w-24 text-right tabular-nums",
+                "shrink-0 whitespace-nowrap tabular-nums",
                 nextRun === "Running"
-                  ? "font-medium text-primary"
+                  ? "font-medium text-primary-text"
                   : enabled && nextRun.startsWith("in ")
                     ? "font-mono text-foreground"
-                    : "text-muted-foreground",
+                    : undefined,
               )}
               title={
                 nextRunAt === null
@@ -461,16 +499,13 @@ function AutomationListRow({
               {nextRun}
             </span>
           </span>
-          {actions ? (
-            <span className="hidden w-80 items-center justify-end gap-1 group-focus-within:flex group-hover:flex">
-              {actions}
-            </span>
-          ) : null}
-        </span>
+        </>
       }
+      className="rounded-lg border border-border bg-surface-raised px-3 transition-colors hover:border-foreground/20"
       muted={muted}
       openLabel={openLabel}
       onOpen={onOpen}
+      actions={actions}
       persistentActions={toggle}
     />
   );
@@ -483,6 +518,7 @@ export function OverviewRow({
   providers,
   showProject,
   now,
+  needsYou = 0,
   onNavigate,
   onEnabledChange,
 }: {
@@ -492,6 +528,7 @@ export function OverviewRow({
   providers: ProviderList;
   showProject: boolean;
   now: number;
+  needsYou?: number;
   onNavigate: (route: AutomationDetailRoute) => void;
   onEnabledChange: (
     enabled: boolean,
@@ -539,7 +576,7 @@ export function OverviewRow({
           ) : null}
         </>
       }
-      cloud={false}
+      needsYou={needsYou}
       schedule={formatAutomationTrigger(automation.trigger)}
       nextRun={automationNextRunText(automation, now)}
       nextRunAt={automation.nextRunAt}
@@ -574,11 +611,13 @@ export function CloudAutomationRow({
   automation,
   providers,
   now,
+  needsYou = 0,
   actions,
 }: {
   automation: CloudAutomation;
   providers: ProviderList;
   now: number;
+  needsYou?: number;
   actions: CloudAutomationActions;
 }) {
   const nextRunAt =
@@ -605,7 +644,7 @@ export function CloudAutomationRow({
           providers={providers}
         />
       }
-      cloud
+      needsYou={needsYou}
       schedule={
         automation.cron === null
           ? "One time"
@@ -629,20 +668,16 @@ export function CloudAutomationRow({
       onOpen={() => actions.onOpen(automation)}
       actions={
         <>
-          <Button
-            size="sm"
-            variant="outline"
+          <ResourceActionButton
+            label="Run now"
+            icon="Play"
             onClick={() => actions.onRun(automation)}
-          >
-            Run now
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
+          />
+          <ResourceActionButton
+            label="Delete"
+            icon="Trash2"
             onClick={() => actions.onDelete(automation)}
-          >
-            Delete
-          </Button>
+          />
         </>
       }
       toggle={
@@ -767,7 +802,12 @@ function isActiveEntry({ automation }: OverviewEntry): boolean {
   );
 }
 
-type ListItem = { name: string; nextRunAt: number | null; node: ReactNode };
+type ListItem = {
+  name: string;
+  nextRunAt: number | null;
+  cloud: boolean;
+  node: ReactNode;
+};
 
 function sortByNextRun(
   items: readonly ListItem[],
@@ -799,6 +839,7 @@ export function AutomationOverviewView({
   activeMode,
   onModeChange,
   cloud,
+  review,
 }: {
   entries: OverviewEntry[] | null;
   error: string | null;
@@ -818,8 +859,11 @@ export function AutomationOverviewView({
     rows: readonly CloudAutomation[];
     actions: CloudAutomationActions;
   };
+  review?: LoopReviewState;
 }) {
   const [query, setQuery] = useState("");
+  const [reviewLayout, setReviewLayout] = useState<ReviewLayout>("list");
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("to-review");
   const [projectFilters, setProjectFilters] = useState<
     AutomationProjectFilter[]
   >([]);
@@ -958,34 +1002,38 @@ export function AutomationOverviewView({
     body = (
       <ResourceListState
         state="error"
-        message="Couldn't load automations."
+        message="Couldn't load loops."
         onRetry={onRetry}
       />
     );
   } else if (entries === null) {
     body = (
       <DelayedLoading>
-        <ResourceListState state="loading" message="Loading automations" />
+        <ResourceListState state="loading" message="Loading loops" />
       </DelayedLoading>
     );
   } else if (entries.length === 0 && cloudRows.length === 0) {
-    body = (
-      <ResourceListState state="empty" message="No automations installed." />
-    );
+    body = <ResourceListState state="empty" message="No loops yet." />;
   } else if (visibleEntries.length === 0 && visibleCloud.length === 0) {
     body = (
       <ResourceListState
         state="empty"
         message={
           normalizedQuery === ""
-            ? "No automations match these filters."
+            ? "No loops match these filters."
             : projectFilters.length > 0 || statusFilters.length > 0
-              ? `No automations match "${query}" with these filters.`
-              : `No automations match "${query}"`
+              ? `No loops match "${query}" with these filters.`
+              : `No loops match "${query}"`
         }
       />
     );
   } else {
+    const needsYou = new Map<string, number>();
+    for (const item of review?.data?.items ?? []) {
+      if (item.status !== "needs-you" || item.reviewedAt !== null) continue;
+      const key = item.loop.id ?? item.loop.name;
+      needsYou.set(key, (needsYou.get(key) ?? 0) + 1);
+    }
     const renderEntry = ({
       automation,
       project,
@@ -1007,6 +1055,7 @@ export function AutomationOverviewView({
           providers={providers}
           showProject={projectBucketCount > 1}
           now={now}
+          needsYou={needsYou.get(automation.id) ?? 0}
           onNavigate={onOpenDetail}
           onEnabledChange={onEnabledChange}
         />
@@ -1015,17 +1064,20 @@ export function AutomationOverviewView({
       name: entry.automation.name,
       nextRunAt:
         "problem" in entry.automation ? null : entry.automation.nextRunAt,
+      cloud: false,
       node: renderEntry(entry),
     });
     const cloudItem = (automation: CloudAutomation): ListItem => ({
       name: automation.name,
       nextRunAt: cloudNextRunAt(automation),
+      cloud: true,
       node: cloud ? (
         <CloudAutomationRow
           key={automation.id}
           automation={automation}
           providers={providers}
           now={now}
+          needsYou={needsYou.get(automation.name) ?? 0}
           actions={cloud.actions}
         />
       ) : null,
@@ -1039,12 +1091,10 @@ export function AutomationOverviewView({
         .map(localItem),
       ...visibleCloud.filter((automation) => automation.enabled).map(cloudItem),
     ];
-    const activeItems = [
-      ...problems.map(localItem),
-      ...(sortMode === "next"
+    const activeItems =
+      sortMode === "next"
         ? sortByNextRun(activeRest, sortDirection)
-        : activeRest),
-    ];
+        : activeRest;
     const inactiveItems = [
       ...inactiveEntries.map(localItem),
       ...visibleCloud
@@ -1054,35 +1104,95 @@ export function AutomationOverviewView({
     const nextRunAt = Math.min(
       ...activeItems.flatMap((item) => item.nextRunAt ?? []),
     );
+    const startOfToday = new Date(now).setHours(0, 0, 0, 0);
+    const failedToday = (review?.data?.items ?? []).filter(
+      (item) =>
+        item.status === "failed" &&
+        item.reviewedAt === null &&
+        item.at >= startOfToday,
+    ).length;
+    const needsYouTotal = [...needsYou.values()].reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    const column = (isCloud: boolean) => {
+      const items = activeItems.filter((item) => item.cloud === isCloud);
+      return (
+        <section
+          className="min-w-0"
+          aria-label={isCloud ? "Cloud" : "This Mac"}
+        >
+          <div className="flex items-center gap-2 pb-2 text-xs">
+            <Icon
+              name={isCloud ? "Cloud" : "Laptop"}
+              className={cn(
+                "size-3.5",
+                isCloud ? "text-primary-text" : "text-muted-foreground",
+              )}
+              aria-hidden
+            />
+            <span className="text-sm font-medium text-foreground">
+              {isCloud ? "Cloud" : "This Mac"}
+            </span>
+            <span className="text-muted-foreground">{items.length}</span>
+            <span className="ml-auto truncate text-muted-foreground/70">
+              {isCloud
+                ? "runs while your Mac is off"
+                : "runs while your Mac is awake"}
+            </span>
+          </div>
+          {items.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border px-3.5 py-3 text-xs text-muted-foreground">
+              {isCloud
+                ? "No cloud loops running."
+                : "No loops running on this Mac."}
+            </div>
+          ) : (
+            <div className="space-y-2">{items.map((item) => item.node)}</div>
+          )}
+        </section>
+      );
+    };
     body = (
-      <div className="pb-4">
-        {activeItems.length > 0 ? (
-          <>
-            <div className="flex items-baseline justify-between pb-1">
-              <span className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground/70">
-                Active · {activeItems.length}
-              </span>
-              {Number.isFinite(nextRunAt) ? (
-                <span className="text-xs text-muted-foreground">
-                  next run{" "}
-                  <span className="font-mono text-foreground">
-                    {formatTimeUntil(nextRunAt, now)}
-                  </span>
-                </span>
-              ) : null}
-            </div>
-            <div className="divide-y divide-foreground/10 border-b border-foreground/10">
-              {activeItems.map((item) => item.node)}
-            </div>
-          </>
+      <div className="pb-6">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <LoopStat label="Active loops" value={activeItems.length} />
+          <LoopStat
+            label="Next run"
+            value={
+              Number.isFinite(nextRunAt) ? formatTimeUntil(nextRunAt, now) : "—"
+            }
+            className="font-mono"
+          />
+          <LoopStat
+            label="Needs you"
+            value={needsYouTotal}
+            className={needsYouTotal > 0 ? "text-warning-text" : undefined}
+            onClick={review ? () => onModeChange("review") : undefined}
+          />
+          <LoopStat
+            label="Failed today"
+            value={failedToday}
+            className={failedToday > 0 ? "text-destructive-text" : undefined}
+            onClick={review ? () => onModeChange("review") : undefined}
+          />
+        </div>
+        {problems.length > 0 ? (
+          <div className="mt-6 divide-y divide-foreground/10">
+            {problems.map(renderEntry)}
+          </div>
         ) : null}
+        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {column(true)}
+          {column(false)}
+        </div>
         {inactiveItems.length > 0 ? (
           <>
             <button
               type="button"
               aria-expanded={inactiveOpen}
               onClick={() => setShowInactive(!inactiveOpen)}
-              className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+              className="mt-8 flex cursor-pointer items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
             >
               <Icon
                 name={inactiveOpen ? "ChevronDown" : "ChevronRight"}
@@ -1095,7 +1205,7 @@ export function AutomationOverviewView({
               </span>
             </button>
             {inactiveOpen ? (
-              <div className="mt-2 divide-y divide-foreground/10 border-y border-foreground/10">
+              <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
                 {inactiveItems.map((item) => item.node)}
               </div>
             ) : null}
@@ -1104,22 +1214,26 @@ export function AutomationOverviewView({
       </div>
     );
   }
-
   return (
     <ResourceCollectionPage
       id="automations-collection"
       description={
         entries !== null && entries.length + cloudRows.length === 0
-          ? "Manage scheduled Cloudroom work across projects and folders. Automations run recurring or one-time tasks without manual prompting."
+          ? "Loops run agents and scripts on a schedule, locally or in the cloud, without you prompting each step."
           : undefined
       }
       underlineTabs
       modes={[
         {
           id: "installed",
-          label: "Installed",
+          label: "Overview",
           count:
             entries === null ? undefined : entries.length + cloudRows.length,
+        },
+        {
+          id: "review",
+          label: "Review",
+          count: review?.data?.toReview || undefined,
         },
         { id: "browse", label: "Browse" },
       ]}
@@ -1138,8 +1252,8 @@ export function AutomationOverviewView({
                 <Input
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search automations"
-                  aria-label="Search automations"
+                  placeholder="Search loops"
+                  aria-label="Search loops"
                   className="h-8 border-0 bg-muted/50 pl-8 text-sm"
                 />
               </div>
@@ -1179,16 +1293,32 @@ export function AutomationOverviewView({
                     label: "Project",
                     disabled: projectBucketCount <= 1,
                   },
-                  { id: "alpha", label: "Automation name" },
+                  { id: "alpha", label: "Loop name" },
                 ]}
                 onChange={handleSortChange}
               />
             </>
+          ) : activeMode === "review" && review ? (
+            <ReviewToolbar
+              layout={reviewLayout}
+              filter={reviewFilter}
+              markable={reviewableItems(review.data?.items ?? []).length}
+              onLayoutChange={setReviewLayout}
+              onFilterChange={setReviewFilter}
+              onMarkAll={() =>
+                review.onMark(
+                  reviewableItems(review.data?.items ?? []).map(
+                    (item) => item.id,
+                  ),
+                  true,
+                )
+              }
+            />
           ) : null}
           <Button
             type="button"
             size="sm"
-            aria-label="New automation"
+            aria-label="New loop"
             className="ml-1 h-8 gap-1.5 px-2.5"
             onClick={() => onCreateViaChat()}
           >
@@ -1198,7 +1328,20 @@ export function AutomationOverviewView({
         </>
       }
     >
-      {activeMode === "browse" ? (
+      {activeMode === "review" && review ? (
+        <ResourceCollectionViewport scrollId="automations-review-results">
+          <LoopReviewView
+            review={review.data}
+            error={review.error}
+            layout={reviewLayout}
+            filter={reviewFilter}
+            now={now}
+            onRetry={review.onRetry}
+            onOpenThread={review.onOpenThread}
+            onMark={review.onMark}
+          />
+        </ResourceCollectionViewport>
+      ) : activeMode === "browse" ? (
         <ResourceCollectionViewport contentClassName="space-y-3">
           <ResourceBrowseGrid>
             {AUTOMATION_CREATE_TEMPLATES.map((template) => (

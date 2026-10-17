@@ -7,9 +7,7 @@ import { getAppSettings, getEnvironment, getHost, getProject } from "@cloudroom/
 import type {
   DynamicTool,
   InstructionMode,
-  PermissionEscalation,
   Thread,
-  ThreadTurnInitiator,
   EnvironmentStatus,
 } from "@cloudroom/domain";
 import type {
@@ -17,6 +15,7 @@ import type {
   HostDaemonInjectedSkillSource,
 } from "@cloudroom/host-daemon-contract";
 import { ApiError } from "../../errors.js";
+import { cloudroom } from "../cloudroom/commands.js";
 import type { LoggedWorkSessionDeps } from "../../types.js";
 import { throwEnvironmentNotReady } from "../lib/lifecycle-api-errors.js";
 import { requireLiveThreadStoragePath } from "./thread-storage.js";
@@ -66,10 +65,6 @@ interface ResolveThreadRuntimeCommandConfigArgs {
   thread: Thread;
 }
 
-interface ResolvePermissionEscalationArgs {
-  initiator: ThreadTurnInitiator;
-}
-
 export interface ResolvedThreadRuntimeCommandConfig {
   contributedEnv: HostDaemonContributedEnvEntry[];
   disallowedTools?: string[];
@@ -114,16 +109,6 @@ function resolveDynamicTools(
       pluginId: contribution.pluginId,
     })),
   ];
-}
-
-export function resolvePermissionEscalation(
-  args: ResolvePermissionEscalationArgs,
-): PermissionEscalation {
-  if (args.initiator !== "user") {
-    return "deny";
-  }
-
-  return "ask";
 }
 
 export async function resolveThreadRuntimeCommandConfig(
@@ -214,6 +199,9 @@ export async function resolveThreadRuntimeCommandConfig(
         hostId: host.id,
         providerId: args.thread.providerId,
       }),
+      ...(args.thread.providerId === "codex"
+        ? await cloudroom(deps).codexAccounts.environment()
+        : []),
     ],
     await resolvePluginProviderEnv({
       providerId: args.thread.providerId,

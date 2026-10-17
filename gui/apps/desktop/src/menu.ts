@@ -5,8 +5,7 @@ import {
   type MenuItemConstructorOptions,
 } from "electron";
 import type { ApplicationMenuAccelerators } from "./desktop-menu-shortcuts.js";
-import type { ConnectServerSyncSkipReason } from "./connect-server-sync.js";
-import { BUILTIN_SERVER_NAME } from "./server-target.js";
+import type { ComputersFailure } from "./computers.js";
 
 const SERVER_DAEMON_LOGS_MENU_LABEL =
   process.platform === "linux"
@@ -35,14 +34,13 @@ const SERVER_MENU_LABEL = "Server";
 const SERVER_MENU_ITEM_ID = "bb-server-menu";
 export const SET_SERVER_URL_MENU_LABEL = "Set Server URL…";
 export const CONNECT_SERVERS_SKIPPED_MENU_LABELS: Record<
-  ConnectServerSyncSkipReason,
+  ComputersFailure,
   string
 > = {
-  "no-credential": "No Connect servers — sign in to Cloudroom Connect",
-  "not-paired": `No Connect servers — Connect not paired on ${BUILTIN_SERVER_NAME}`,
-  "plugin-disabled": "No Connect servers — Connect plugin disabled",
-  unauthorized: "No Connect servers — sign in to Cloudroom Connect again",
-  unavailable: "No Connect servers — could not reach Cloudroom Connect",
+  "no-credential": "No other Macs — sign in to Cloudroom",
+  offline: "No other Macs — could not reach Cloudroom Connect",
+  unauthorized: "No other Macs — sign in to Cloudroom again",
+  unavailable: "No other Macs — could not reach Cloudroom Connect",
 };
 
 interface ApplicationMenuServerItem {
@@ -73,7 +71,7 @@ export interface InstallApplicationMenuArgs {
   onServerMenuWillShow?: () => void;
   serverDaemonLogsMenuEnabled: boolean;
   servers: ApplicationMenuServerItem[];
-  connectServersSkipReason: ConnectServerSyncSkipReason | null;
+  connectServersSkipReason: ComputersFailure | null;
 }
 
 function createServerDaemonLogsMenuItems(
