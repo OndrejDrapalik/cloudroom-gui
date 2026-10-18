@@ -198,6 +198,7 @@ async function startIntegrationServer(
     appUrl: "https://bb.example.test",
     serverPort: 0,
     sharedSkillRoots: { user: [], project: [] },
+    userSkillsRootPath: path.join(serverDataDir, "skills"),
     transcriptionModel: "test/mock-transcription",
     isDevelopment: false,
   };

@@ -165,8 +165,12 @@ export function findThreadEvent(
 export function getLastThreadOutput(
   db: DbConnection,
   threadId: string,
+  turnId?: string,
 ): string | null {
-  const row = getLatestThreadOutputEventRow(db, { threadId });
+  const row = getLatestThreadOutputEventRow(db, {
+    threadId,
+    ...(turnId === undefined ? {} : { turnId }),
+  });
 
   if (!row) return null;
 
@@ -185,6 +189,26 @@ export function getLastThreadOutput(
   }
 
   return null;
+}
+
+/** The latest error, in one turn when given, as "message: detail". */
+export function getTurnErrorText(
+  db: DbConnection,
+  threadId: string,
+  turnId?: string,
+): string | null {
+  const row = getLatestThreadSystemErrorEventRow(db, {
+    threadId,
+    includeProviderErrors: true,
+    ...(turnId === undefined ? {} : { turnId }),
+  });
+  if (!row) return null;
+  const eventRow = parseStoredEventRow(row);
+  if (eventRow.type !== "system/error" && eventRow.type !== "provider/error")
+    return null;
+  return [eventRow.data.message, eventRow.data.detail]
+    .filter((part) => part !== undefined && part.trim() !== "")
+    .join(": ");
 }
 
 export function getLastThreadErrorMessage(

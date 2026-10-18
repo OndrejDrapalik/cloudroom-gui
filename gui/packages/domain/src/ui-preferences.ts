@@ -76,6 +76,8 @@ export const UI_PREFERENCE_KEYS = [
   "threadPurpose.enabled",
   "threadPurpose.model",
   "threadPurpose.reasoningEffort",
+  "appearance.theme",
+  "defaults.startingMachine",
 ] as const;
 export type UiPreferenceKey = (typeof UI_PREFERENCE_KEYS)[number];
 const uiPreferenceKeySchema = z.enum(UI_PREFERENCE_KEYS);
@@ -235,6 +237,16 @@ export const uiPreferenceDefinitions = {
     z.enum(["none", "low", "medium", "high"]),
     "medium",
     "Reasoning effort for the thread purpose model.",
+  ),
+  "appearance.theme": defineUiPreference(
+    z.enum(["light", "dark", "system"]),
+    "system",
+    "Light, dark, or system color mode for every Cloudroom window.",
+  ),
+  "defaults.startingMachine": defineUiPreference(
+    z.enum(["cloud", "last"]),
+    "cloud",
+    "Where new threads start: cloud, or last for the machine used last.",
   ),
 } as const satisfies Record<UiPreferenceKey, UiPreferenceDefinition>;
 

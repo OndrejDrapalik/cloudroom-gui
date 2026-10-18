@@ -6,7 +6,7 @@ description: "Create or improve Cloudroom skills, including their triggers, inst
 # Skill creator
 
 Create skills that add useful domain knowledge and trigger only for relevant tasks.
-User skills live at `~/.bb/skills/<name>/SKILL.md`. Edit built-in and plugin
+User skills live at `~/.cloudroom/skills/<name>/SKILL.md`. Edit built-in and plugin
 skills at their source, not in generated runtime copies.
 
 ## Contract

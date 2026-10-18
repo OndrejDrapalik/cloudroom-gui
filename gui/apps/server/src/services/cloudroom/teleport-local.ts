@@ -5,7 +5,7 @@ import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, wri
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, normalize, sep } from "node:path";
 import { promisify } from "node:util";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import {
   cloudroomCommands,
   cloudroomThreads,
@@ -88,12 +88,19 @@ async function run(deps: AppDeps, threadId: string, step: (value: TeleportLocalS
   const vmPath = (await vm(client, findNative(harness, nativeId))).toString().trim();
   if (!vmPath) throw new ApiError(409, "teleport_unavailable", "The cloud conversation file was not found. The thread stays in Cloud.");
   const cloud = await client.sessionWorkspace(saved.sessionId);
-  const [session, changes] = await Promise.all([
+  const lineage = harness === "codex" ? await codexLineage(client, vmPath) : [];
+  const [session, changes, parents] = await Promise.all([
     download(client, vmPath),
     cloudChanges(client, cloud.path, await git(environment.path, ["rev-parse", "HEAD"]), thread.createdAt),
+    Promise.all(lineage.map((path) => download(client, path))),
   ]);
   step("copying");
   if (harness === "acp-cursor" || harness === "acp-opencode") await vm(client, `rm -f ${quote(vmPath)}`).catch(() => {});
+  // A parent file that differs on the Mac is set aside, unless another Local thread is still using it.
+  const inUse = (id: string) => deps.db.select({ id: threads.id }).from(threads)
+    .where(and(eq(threads.providerId, "codex"), eq(threads.executionTarget, "local"), isNull(threads.archivedAt), isNull(threads.deletedAt))).all()
+    .some((row) => row.id !== threadId && getLastProviderThreadId(deps, row.id) === id);
+  for (const [index, path] of lineage.entries()) await installNative("codex", "", path, parents[index]!, environment.path, inUse);
   if (harness === "acp-opencode") await importOpenCode(deps, threadId, environment, nativeId, session);
   else await installNative(harness, nativeId, vmPath, session, environment.path);
   const conflicts = await applyChanges(environment.path, changes.archive, randomUUID(), changes.base);
@@ -265,6 +272,23 @@ mkdir -p ~/.cache/cloudroom && tar -czf ~/.cache/cloudroom/cursor-${nativeId}.tg
 done; exit 0`;
 }
 
+/** A Codex fork stores only its new turns and reads the rest from its parents' files at saved byte offsets.
+ *  Returns those parent files on the VM, nearest first, searched like Codex: active sessions, then archived. */
+export async function codexLineage(client: CloudroomClient, path: string): Promise<string[]> {
+  const script = `import json, os, sys
+home, path = os.path.expanduser("~/.codex"), sys.argv[1]
+for _ in range(64):
+    with open(path, "rb") as f: base = (json.loads(f.readline()).get("payload") or {}).get("history_base")
+    if not base: break
+    id = base["thread_id"]
+    path = next((os.path.join(d, n) for r in ("sessions", "archived_sessions") for d, _, names in os.walk(os.path.join(home, r))
+                 for n in names if n.endswith(("-%s.jsonl" % id, "_%s.jsonl" % id))), None)
+    if not path: sys.exit("The parent conversation %s of this forked Codex chat is missing." % id)
+    print(path)
+else: sys.exit("This forked Codex chat has too many parents.")`;
+  return (await vm(client, `python3 -I -c ${quote(script)} ${quote(path)}`)).toString().split("\n").filter(Boolean);
+}
+
 export async function download(client: CloudroomClient, path: string, maxMb = Infinity): Promise<Buffer> {
   const size = Number((await vm(client, `[ -f ${quote(path)} ] && wc -c < ${quote(path)} || echo -1`)).toString().trim());
   if (size < 0) throw new ApiError(404, "cloud_file_missing", `${path} is not a file in the cloud.`);
@@ -369,18 +393,27 @@ async function git(cwd: string, args: string[]): Promise<string | null> {
   return exec("git", ["-C", cwd, ...args], { maxBuffer: 64 * 1024 * 1024 }).then((result) => result.stdout, () => null);
 }
 
-async function installNative(harness: Harness, nativeId: string, vmPath: string, bytes: Buffer, cwd: string) {
+/** `lineage`: a Codex fork's parent file (see `codexLineage`), kept byte-for-byte. A Mac copy that already holds
+ *  those bytes stays, since its own forks may read further; any other copy is set aside unless it is in use. */
+async function installNative(harness: Harness, nativeId: string, vmPath: string, bytes: Buffer, cwd: string, lineage?: (id: string) => boolean) {
   if (harness === "acp-cursor") return installCursor(nativeId, bytes, cwd);
   const end = bytes.indexOf(10);
   if (end < 0) throw new Error("The cloud conversation file is empty.");
   let data = bytes;
-  if (harness !== "claude-code") {
+  if (lineage) nativeId = /^rollout-.{19}-(.+)\.jsonl$/.exec(basename(vmPath))?.[1] ?? "";
+  else if (harness !== "claude-code") {
     const header = JSON.parse(bytes.subarray(0, end).toString("utf8"));
     if (harness === "codex" && header.type === "session_meta") header.payload.cwd = cwd;
     if (harness === "pi" && header.type === "session") header.cwd = cwd;
     data = Buffer.concat([Buffer.from(JSON.stringify(header)), bytes.subarray(end)]);
   }
+  if (!nativeId) throw new Error("The cloud conversation file has an unexpected name.");
   const target = await nativeTarget(harness, nativeId, basename(vmPath), cwd);
+  if (lineage && existsSync(target)) {
+    if ((await readFile(target)).subarray(0, data.length).equals(data)) return;
+    if (lineage(nativeId.split("_")[0]!))
+      throw new ApiError(409, "teleport_unavailable", "This forked chat's parent conversation is open in another Local thread with different history. The thread stays in Cloud.");
+  }
   await mkdir(dirname(target), { recursive: true });
   if (existsSync(target)) await rename(target, `${target}.before-teleport-${Date.now()}`);
   const temporary = `${target}.${randomUUID()}.tmp`;

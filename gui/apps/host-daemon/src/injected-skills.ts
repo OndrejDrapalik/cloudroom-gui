@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
+import { resolveUserSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import type { AgentRuntimeSkillRoot } from "@cloudroom/agent-runtime";
 import type { HostDaemonInjectedSkillSource } from "@cloudroom/host-daemon-contract";
 import type { HostDaemonSkillTree } from "@cloudroom/host-daemon-contract";
@@ -180,12 +180,12 @@ function resolveStageRootPath(dataDir: string, catalogHash: string): string {
   return path.join(resolveStagingRootPath(dataDir), catalogHash);
 }
 
-export async function ensureDataDirSkillsRootPath(
-  dataDir: string,
+export async function ensureUserSkillsRootPath(
+  homeDir: string,
 ): Promise<string> {
-  const dataDirSkillsRootPath = resolveDataDirSkillsRootPath(dataDir);
-  await fs.mkdir(dataDirSkillsRootPath, { recursive: true });
-  return dataDirSkillsRootPath;
+  const userSkillsRootPath = resolveUserSkillsRootPath(homeDir);
+  await fs.mkdir(userSkillsRootPath, { recursive: true });
+  return userSkillsRootPath;
 }
 
 function normalizeRelativePath(relativePath: string): string {

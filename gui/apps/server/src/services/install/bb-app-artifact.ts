@@ -27,7 +27,7 @@ const HOST_DEPENDENCIES = [
   "pino-roll",
 ] as const;
 const HOST_DAEMON_FILES = [
-  "bb",
+  "room-cli",
   "bb-parcel-watcher-child.mjs",
   "bb-plugin-host-worker.mjs",
   "bb-provider-bridge-worker.mjs",
@@ -162,11 +162,11 @@ function hostPackageJson(packageJson: BbAppPackageJson): object {
   return {
     name: packageJson.name,
     version: packageJson.version,
-    description: "bb enrolled host runtime",
+    description: "Cloudroom enrolled host runtime",
     type: "module",
     os: packageJson.os,
     bin: {
-      bb: "dist/bb.js",
+      "room-cli": "dist/room-cli.js",
       "bb-app": "dist/bb-app.js",
       "bb-host-daemon": "dist/bb-host-daemon.js",
     },
@@ -187,7 +187,7 @@ async function materializePackagedHostPackage(
   const hostDaemonTarget = join(hostPackageRoot, "host-daemon", "dist");
   await mkdir(hostDaemonTarget, { recursive: true });
   await mkdir(distDir, { recursive: true });
-  for (const fileName of ["bb-app.js", "bb-host-daemon.js", "bb.js"]) {
+  for (const fileName of ["bb-app.js", "bb-host-daemon.js", "room-cli.js"]) {
     await copyFile(
       join(packageRoot, "dist", fileName),
       join(distDir, fileName),
@@ -200,10 +200,10 @@ async function materializePackagedHostPackage(
       join(hostDaemonTarget, fileName),
     );
   }
-  await chmod(join(hostDaemonTarget, "bb"), 0o755);
+  await chmod(join(hostDaemonTarget, "room-cli"), 0o755);
   await cp(
-    join(hostDaemonSource, "bb-chunks"),
-    join(hostDaemonTarget, "bb-chunks"),
+    join(hostDaemonSource, "room-cli-chunks"),
+    join(hostDaemonTarget, "room-cli-chunks"),
     { recursive: true },
   );
   try {

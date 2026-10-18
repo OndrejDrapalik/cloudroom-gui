@@ -27,14 +27,17 @@ function SectionSidebarBackButton({ label, to }: { label: string; to: string }) 
       to={to}
       onClick={closeOnMobile}
       aria-keyshortcuts={shortcut?.ariaKeyshortcuts}
-      className="flex h-10 w-full items-center gap-2.5 rounded-md bg-primary px-3 text-sm font-bold text-primary-foreground shadow-[0_4px_14px_color-mix(in_oklch,var(--primary)_20%,transparent)] transition-[filter] hover:brightness-95 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-md:pointer-coarse:h-11"
+      className="flex h-9 w-full items-center gap-2.5 rounded-md px-2 text-sm font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-md:pointer-coarse:h-11"
     >
-      <Icon name="ArrowLeft" className={COARSE_POINTER_ICON_SIZE_CLASS} />
+      <Icon
+        name="ArrowLeft"
+        className={cn(COARSE_POINTER_ICON_SIZE_CLASS, "text-primary-text")}
+      />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {shortcut ? (
         <AppCommandShortcutPill
           shortcut={shortcut}
-          className="bg-primary-foreground/15 font-semibold text-primary-foreground opacity-100 max-md:pointer-coarse:hidden"
+          className="border border-border-hairline bg-transparent opacity-100 max-md:pointer-coarse:hidden"
         />
       ) : null}
     </Link>
@@ -149,8 +152,9 @@ export function SectionSidebar({
       <SidebarTopReserveRow
         testId={`${testIdPrefix}-sidebar-top-reserve-row`}
       />
-      <div className="shrink-0 px-2 py-2">
+      <div className="shrink-0 px-2 pt-2 pb-1">
         <SectionSidebarBackButton label={backLabel} to={backTo} />
+        <div className="mx-0.5 mt-2 h-px bg-sidebar-border" />
       </div>
       <SidebarContent>
         <div className="min-w-0 px-2">{children}</div>

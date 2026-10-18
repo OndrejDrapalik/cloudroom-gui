@@ -45,6 +45,12 @@ if [ ! -f "$venv/.ready" ]; then
   rm -rf "$tmp"; rmdir "$home/install.lock"; trap - EXIT
 fi
 
+# 0.1.13 misses Brave's Linux folders (upstream PRs 650 and 843). Drop once a release has them.
+py="$venv/lib/python3.12/site-packages/browser_harness/daemon.py"
+if [ "$(uname -s)" = Linux ] && ! grep -qs '".config/BraveSoftware/Brave-Browser"' "$py"; then
+  sed -i 's|".config/google-chrome",|".config/google-chrome", ".config/BraveSoftware/Brave-Browser", ".config/BraveSoftware/Brave-Origin",|' "$py" 2>/dev/null || true
+fi
+
 # Use the user's default browser: when it is Chromium-based and closed, open it in the background so
 # browser-harness attaches to it. Safari and Firefox have no DevTools protocol.
 if [ "$(uname -s)" = Darwin ] && { [ $# -eq 0 ] || [ "$1" = -c ]; } && [ -z "$BU_CDP_WS$BU_CDP_URL$BU_NAME" ]; then

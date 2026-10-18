@@ -2491,7 +2491,7 @@ async function handleModelList(
   }
   if (dialectId === "cursor") {
     throw new Error(
-      "Cursor model discovery returned no models. Restart Cursor and try again.",
+      "Cursor returned no models. Your Cursor CLI may be out of date. Run `cursor-agent update`, then restart Cloudroom.",
     );
   }
   sendResult(id, {

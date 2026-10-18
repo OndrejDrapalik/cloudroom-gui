@@ -1,19 +1,12 @@
-import { useAtom } from "jotai";
-import { atomWithStorage } from "jotai/utils";
+import { getDefaultStore, useAtom } from "jotai";
 import { cloudCanRunHarness } from "@/hooks/queries/cloudroom-queries";
-import { createLocalStorageEnumStorage } from "@/lib/browser-storage";
+import { createSyncedPreferenceAtom } from "@/lib/ui-preferences/synced-preference-atom";
 
 export type StartingMachine = "cloud" | "last";
 
-const STARTING_MACHINE_KEY = "cloudroom.startingMachine";
-
-const startingMachineAtom = atomWithStorage<StartingMachine>(
-  STARTING_MACHINE_KEY,
-  "cloud",
-  createLocalStorageEnumStorage<StartingMachine>(
-    (value): value is StartingMachine => value === "cloud" || value === "last",
-  ),
-  { getOnInit: true },
+const startingMachineAtom = createSyncedPreferenceAtom(
+  "defaults.startingMachine",
+  "cloudroom.startingMachine",
 );
 
 export function useStartingMachine() {
@@ -22,7 +15,7 @@ export function useStartingMachine() {
 
 export function startingExecutionTarget(newThread: boolean): "local" | "cloud" {
   const startInCloud =
-    newThread && localStorage.getItem(STARTING_MACHINE_KEY) !== "last";
+    newThread && getDefaultStore().get(startingMachineAtom) !== "last";
   return startInCloud ||
     localStorage.getItem("cloudroom.executionTarget") === "cloud"
     ? "cloud"

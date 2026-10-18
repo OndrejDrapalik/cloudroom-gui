@@ -42,7 +42,7 @@ Skills (.bb/skills/):
   cloudroom resolves skills from three sources, in increasing precedence:
 
     plugin     Skills from enabled plugins, including the bundled Cloudroom guide.
-    user       <dataDir>/skills (e.g. ~/.bb/skills).
+    user       ~/.cloudroom/skills, shared by every Cloudroom on this computer.
     project    <workspace>/.bb/skills.
 
   A project skill overrides a user or plugin skill with the same name. Two

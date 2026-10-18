@@ -1,10 +1,12 @@
 import { cloudroom } from "./services/cloudroom/commands.js";
 import { serve } from "@hono/node-server";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ServerConfig } from "@cloudroom/config/server";
 import { isLoopbackHostname } from "@cloudroom/config/loopback";
+import { moveLegacyUserSkills, resolveUserSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import { toOptionalString } from "@cloudroom/config/strings";
 import { createLogger } from "@cloudroom/logger";
 import { getAppSettings } from "@cloudroom/db";
@@ -96,7 +98,19 @@ export async function runServer(serverConfig: ServerConfig): Promise<void> {
     serverPort: serverConfig.BB_SERVER_PORT,
     sharedSkillRoots: { user: [], project: [] },
     transcriptionModel: serverConfig.BB_TRANSCRIPTION,
+    userSkillsRootPath: resolveUserSkillsRootPath(homedir()),
   };
+  await moveLegacyUserSkills({
+    dataDir: runtimeConfig.dataDir,
+    userSkillsRootPath: runtimeConfig.userSkillsRootPath,
+  }).then(
+    ({ moved, skipped }) => {
+      if (moved.length > 0 || skipped.length > 0) {
+        logger.info({ moved, skipped }, "Moved user skills to ~/.cloudroom/skills");
+      }
+    },
+    (error: unknown) => logger.warn({ error }, "Could not move user skills to ~/.cloudroom/skills"),
+  );
 
   const providerRegistry = createProviderRegistryService({
     deferRegistrationsSettled: true,

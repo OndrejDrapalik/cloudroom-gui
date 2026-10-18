@@ -751,6 +751,8 @@ describe("internal event append ownership", () => {
         [
           `${threadMention} failed.`,
           "",
+          "Error: Provider process exited",
+          "",
           "Review the thread before deciding next steps.",
         ].join("\n"),
       );

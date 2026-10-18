@@ -28,8 +28,14 @@ This index lists every command path that the core CLI registers. Read the task-s
 - `room-cli cloud retry-start`
 - `room-cli cloud thread-workspace`
 - `room-cli cloud share THREAD [--status|--stop]`
+- `room-cli cloud env list|set NAME|unset NAME`
+- `room-cli cloud repo add|remove OWNER/NAME`
+- `room-cli cloud setup set`
+- `room-cli cloud auto-delete [30|90|180|365|never]`
 
 `sign-in --project ID` prints the browser link for connecting the account's existing VM. `--website-url http://127.0.0.1:PORT` is for local website development. All commands accept `--json`. Logout removes this app's VM credentials, not remote jobs or local history. Existing cloud bindings block switching to another account/core. `retry-start` retries a rejected launch with its saved prompt and original request ID; it never reruns an existing cloud session.
+
+`cloud env`, `repo`, and `setup` change Settings → Cloud environment for every new cloud sandbox. `env set NAME` and `setup set` read the value from stdin, never an argument; `env list` shows key names and the last 4 characters of long values, never the values. `auto-delete` shows or sets Settings → Auto-delete; `never` keeps unused cloud threads forever.
 
 `thread-workspace` reads the thread's live cloud directory, branch, and commit. An unavailable core never falls back to the local checkout.
 

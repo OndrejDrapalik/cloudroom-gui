@@ -3,7 +3,6 @@ import fs from "node:fs";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import matter from "gray-matter";
-import { resolveDataDirSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import type { HostDaemonInjectedSkillSource } from "@cloudroom/host-daemon-contract";
 import { z } from "zod";
 import type { ServerLogger } from "../../types.js";
@@ -36,7 +35,7 @@ const skillFrontmatterSchema = z
 export interface ResolveInjectedSkillSourcesArgs {
   builtinSkillsRootPath?: string;
   additionalSkillsRootPaths?: readonly string[];
-  dataDir: string;
+  userSkillsRootPath: string;
   pluginSkillRoots?: readonly PluginSkillRoot[];
   pluginSkillSelections?: ReadonlyMap<string, ReadonlySet<string>>;
   projectSkillSources?: readonly ProjectInjectedSkillSource[];
@@ -90,7 +89,7 @@ export interface ResolvedSkillCatalogEntry {
 
 interface ResolveServerOwnedSkillCatalogEntriesArgs {
   builtinSkillsRootPath: string | null;
-  dataDir: string;
+  userSkillsRootPath: string;
   logger: ServerLogger;
   skillTreeRegistry: SkillTreeRegistry;
 }
@@ -539,7 +538,7 @@ export function resolveServerOwnedSkillCatalogEntries(
   const user = readSkillsRoot({
     logger: args.logger,
     skillTreeRegistry: args.skillTreeRegistry,
-    skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
+    skillsRootPath: args.userSkillsRootPath,
     sourceType: "data-dir",
   }).map((runtimeSource) => ({
     provenance: { kind: "user" } as const,
@@ -636,7 +635,7 @@ export function resolveSkillCatalogEntries(
   const dataDirSources = readSkillsRoot({
     logger,
     skillTreeRegistry,
-    skillsRootPath: resolveDataDirSkillsRootPath(args.dataDir),
+    skillsRootPath: args.userSkillsRootPath,
     sourceType: "data-dir",
   });
   const inheritedSourceGroups = (args.additionalSkillsRootPaths ?? []).map(

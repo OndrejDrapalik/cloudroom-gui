@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { basename, dirname } from "node:path";
 import { promisify } from "node:util";
 import { Command } from "commander";
+import type { AutoDeleteDays, CloudEnvironmentChange } from "@cloudroom/sdk";
 import { action } from "../action.js";
 import { createCliBbSdk } from "../client.js";
 import { resolveContextThreadId } from "../context-env.js";
@@ -20,6 +21,8 @@ async function readStdin(): Promise<Buffer> {
   for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
   return Buffer.concat(chunks);
 }
+
+const AUTO_DELETE_CHOICES = ["30", "90", "180", "365", "never"];
 
 type VmTarget = { thread?: string };
 const THREAD_OPTION = ["--thread <id>", "Cloud thread whose sandbox to use; required unless you have a cloud VM"] as const;
@@ -173,6 +176,46 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
     if (process.stdin.isTTY) throw new Error(`Pipe your ${provider} API key into this command.`);
     const result = await createCliBbSdk(getUrl()).cloudroom.piApiKey(provider, (await readStdin()).toString().trim());
     if (!outputJson(options, result)) console.log(`Saved. Pi on your VM has logins for: ${result.providers.join(", ")}`);
+  }));
+  const change = async (update: CloudEnvironmentChange, options: JsonOutputOptions, done: string) => {
+    const environment = await createCliBbSdk(getUrl()).cloudroom.updateEnvironment(update);
+    if (!outputJson(options, environment)) console.log(done);
+  };
+  const piped = async (what: string) => {
+    if (process.stdin.isTTY) throw new Error(`Pipe the ${what} into this command.`);
+    return (await readStdin()).toString().replace(/\n$/, "");
+  };
+  const env = group.command("env").description("API keys every cloud thread gets as environment variables");
+  env.command("list").description("Show key names (values stay hidden), GitHub repos, and the setup script").option("--json", "Print JSON").action(action(async (options: JsonOutputOptions) => {
+    const { variables, repos, setup } = await createCliBbSdk(getUrl()).cloudroom.environment();
+    if (outputJson(options, { variables, repos, setup })) return;
+    console.log(`API keys:${variables.map(({ name, hint }) => `\n  ${name}${hint ? `  …${hint}` : ""}`).join("") || " none"}`);
+    console.log(`GitHub repos:${repos.map((repo) => `\n  ${repo}`).join("") || " none"}`);
+    console.log(`Setup script:${setup ? `\n${setup.replace(/^/gm, "  ")}` : " none"}`);
+  }));
+  env.command("set <name>").description("Read the value from stdin, never a command argument").option("--json", "Print JSON").action(action(async (name: string, options: JsonOutputOptions) => {
+    await change({ action: "set", variables: { [name]: await piped(`value of ${name}`) } }, options, `Saved ${name}.`);
+  }));
+  env.command("unset <name>").option("--json", "Print JSON").action(action(async (name: string, options: JsonOutputOptions) => {
+    await change({ action: "remove", name }, options, `Removed ${name}.`);
+  }));
+  const repo = group.command("repo").description("GitHub repos cloned into every cloud sandbox, next to the project");
+  repo.command("add <owner/name>").option("--json", "Print JSON").action(action(async (name: string, options: JsonOutputOptions) => {
+    await change({ action: "addRepo", repo: name }, options, `Added ${name}. New cloud sandboxes clone it into /repos.`);
+  }));
+  repo.command("remove <owner/name>").option("--json", "Print JSON").action(action(async (name: string, options: JsonOutputOptions) => {
+    await change({ action: "removeRepo", repo: name }, options, `Removed ${name}.`);
+  }));
+  const setup = group.command("setup").description("Script that runs once in each new cloud sandbox");
+  setup.command("set").description("Read the script from stdin; empty input clears it").option("--json", "Print JSON").action(action(async (options: JsonOutputOptions) => {
+    const script = await piped("setup script");
+    await change({ action: "setup", setup: script }, options, script.trim() ? "Saved. New cloud sandboxes run it once." : "Setup script cleared.");
+  }));
+  group.command("auto-delete [days]").description("Show or set how long unused cloud threads are kept: 30, 90, 180, 365, or never").option("--json", "Print JSON").action(action(async (days: string | undefined, options: JsonOutputOptions) => {
+    const sdk = createCliBbSdk(getUrl()).cloudroom;
+    if (days !== undefined && !AUTO_DELETE_CHOICES.includes(days)) throw new Error(`Pick one of: ${AUTO_DELETE_CHOICES.join(", ")}.`);
+    const result = days === undefined ? await sdk.autoDelete() : await sdk.setAutoDelete(days === "never" ? null : Number(days) as AutoDeleteDays);
+    if (!outputJson(options, result)) console.log(result.days === null ? "Unused cloud threads are kept forever." : `Unused cloud threads are deleted after ${result.days} days.`);
   }));
   group.command("sign-in").option("--project <id>", "Legacy prepared-project binding (optional)")
     .option("--website-url <url>", "Loopback website for local development")

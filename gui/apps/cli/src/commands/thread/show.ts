@@ -77,6 +77,7 @@ interface ThreadShowJsonPayload extends ThreadStatusPayload {
   pendingTodos: ThreadTimelinePendingTodos | null;
   workStatus?: WorkspaceStatus | null;
   gitDiff?: ThreadGitDiffResponse | null;
+  lastError?: string | null;
 }
 
 interface ThreadShowPullRequestPayload {
@@ -332,6 +333,10 @@ export function registerShowCommand(
           threadId,
         });
         const execution = await fetchExecution(sdk, thread);
+        const lastError =
+          thread.status === "error"
+            ? ((await sdk.threads.output({ threadId })).error ?? null)
+            : null;
 
         if (opts.json) {
           const environment = await getEnvironment();
@@ -343,6 +348,7 @@ export function registerShowCommand(
               fetchedPullRequest,
             ),
             pendingTodos,
+            ...(thread.status === "error" ? { lastError } : {}),
           };
           if (fetchedWorkStatus !== undefined) {
             jsonPayload.workStatus = fetchedWorkStatus.available
@@ -359,6 +365,7 @@ export function registerShowCommand(
         }
 
         printThreadStatus(statusPayload, execution, environmentInfo, fetchedPullRequest);
+        if (lastError) console.log(`  Error: ${lastError}`);
 
         printPendingTodos(pendingTodos);
 

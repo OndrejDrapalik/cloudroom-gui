@@ -358,14 +358,18 @@ async function startOrJoinSubmittedTurn(
   try {
     return await runSubmittedTurn(command, entry);
   } catch (error) {
-    const activeTurnId = entry.runtime.getActiveTurnId(command.threadId);
     if (
       !(error instanceof AgentRuntimeTurnBusyError) ||
-      activeTurnId === null ||
       isStandaloneBuiltinCompactCommand(command.input)
     ) {
       throw error;
     }
+    // A turn that is still starting has no ID yet: wait for it rather than
+    // failing the submit, which marked the parent "failed" (feedback #308).
+    const activeTurnId =
+      entry.runtime.getActiveTurnId(command.threadId) ??
+      (await resolveLiveSubmittedTurnTarget(command, entry));
+    if (activeTurnId === null) return await runSubmittedTurn(command, entry);
     return await steerSubmittedTurn(command, entry, activeTurnId);
   }
 }

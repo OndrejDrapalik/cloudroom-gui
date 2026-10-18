@@ -33,6 +33,8 @@ import {
   type ThreadProvisionContext,
 } from "./thread-startup-store.js";
 import { applyLoggedThreadLifecycleEvent } from "./lifecycle-outcome.js";
+import { queueChildThreadTurnNotificationBestEffort } from "./child-thread-notifications.js";
+import { isParentNotifiableChildThread } from "./thread-parent.js";
 
 export type ThreadProvisioningDeps = CommandResultSideEffectsDeps;
 interface EnsureWorkspaceReadyEventArgs {
@@ -144,10 +146,19 @@ export function failThreadProvisioning(
     detail: args.detail,
     scope: threadScope(),
   });
-  applyLoggedThreadLifecycleEvent(deps, {
+  const outcome = applyLoggedThreadLifecycleEvent(deps, {
     event: { type: "run.failed" },
     threadId: args.thread.id,
   });
+  // A child that never got a workspace never ends a turn, so tell its parent
+  // here (feedback #565).
+  if (outcome.applied && isParentNotifiableChildThread(args.thread))
+    void queueChildThreadTurnNotificationBestEffort(deps, {
+      childThread: args.thread,
+      failureReason: `Workspace setup failed: ${args.detail}`,
+      parentThreadId: args.thread.parentThreadId,
+      turnStatus: "failed",
+    });
 }
 
 export async function ensureThreadProvisionEnvironmentReady(

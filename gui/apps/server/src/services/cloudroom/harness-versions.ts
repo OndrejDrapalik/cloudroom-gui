@@ -10,9 +10,12 @@ export type HarnessVersions = { codex?: string; claude?: string; opencode?: stri
 function versionOf(binary: string | undefined): Promise<string | undefined> {
   if (!binary) return Promise.resolve(undefined);
   return new Promise((resolve) => {
-    execFile(binary, ["--version"], { timeout: 10_000 }, (error, stdout) => {
-      resolve(error ? undefined : /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(stdout)?.[1]);
-    });
+    // execFile throws, rather than calling back, for some spawn errors (an Intel binary on a Mac without Rosetta).
+    try {
+      execFile(binary, ["--version"], { timeout: 10_000 }, (error, stdout) => {
+        resolve(error ? undefined : /(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)/.exec(stdout)?.[1]);
+      });
+    } catch { resolve(undefined); }
   });
 }
 

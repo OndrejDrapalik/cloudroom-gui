@@ -55,7 +55,7 @@ type Source = {
   source: string;
   size: number;
   sha256: string;
-  kind: "native" | "context" | "project" | "attachment";
+  kind: "native" | "lineage" | "context" | "project" | "attachment";
   executable: boolean;
   frozen?: string;
   symlink?: boolean;
@@ -134,29 +134,33 @@ async function nativePath(
     )
       return path;
   } else {
-    const root = join(
-      process.env.CODEX_HOME || join(homedir(), ".codex"),
-      "sessions",
+    const found = await codexRollouts((name) =>
+      name.endsWith(`-${nativeId}.jsonl`),
     );
-    const found: string[] = [];
-    async function visit(dir: string) {
-      for (const entry of await readdir(dir, { withFileTypes: true })) {
-        const path = join(dir, entry.name);
-        if (entry.isDirectory()) await visit(path);
-        else if (entry.isFile() && entry.name.endsWith(`-${nativeId}.jsonl`))
-          found.push(path);
-      }
-    }
-    for (const directory of [root, join(dirname(root), "archived_sessions")]) {
-      await visit(directory).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
-      });
-    }
     if (found.length === 1) return found[0]!;
   }
   throw new Error(
     `Saved ${harness} conversation is unavailable for ${threadId}; local history was not changed`,
   );
+}
+
+/** Codex rollout files whose names match, searched in Codex's order: active sessions, then archived ones. */
+async function codexRollouts(match: (name: string) => boolean) {
+  const home = process.env.CODEX_HOME || join(homedir(), ".codex");
+  const found: string[] = [];
+  async function visit(dir: string) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) await visit(path);
+      else if (entry.isFile() && match(entry.name)) found.push(path);
+    }
+  }
+  for (const directory of ["sessions", "archived_sessions"]) {
+    await visit(join(home, directory)).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+  return found;
 }
 
 const captures = new Map<string, Promise<unknown>>();
@@ -340,6 +344,31 @@ async function runCapture(
     )
       throw new Error("Native history has no matching session identity");
     if (session.threadId === command.threadId) capture.nativeId = id;
+    // A Codex fork stores only its new turns and reads the rest from its parents' files at saved byte
+    // offsets, so every parent travels too, byte-for-byte.
+    if (session.harness === "codex" && session.threadId === command.threadId)
+      for (let base = header.payload?.history_base, depth = 0; base; depth++) {
+        const parentId = String(base.thread_id);
+        const [parent] = await codexRollouts(
+          (name) =>
+            name.endsWith(`-${parentId}.jsonl`) ||
+            name.endsWith(`_${parentId}.jsonl`),
+        );
+        if (!parent || depth === 64)
+          throw new Error(
+            `The parent conversation ${parentId} of this forked Codex chat is missing or loops; local history was not changed`,
+          );
+        if ((await lstat(parent)).size > HOST_ARTIFACT_MAX_BYTES)
+          throw new Error("Native history exceeds the bounded capture size");
+        const data = await readFile(parent);
+        // A parent still running locally may be mid-write; its forks never read past a full line.
+        const frozen = join(root, `lineage-${depth}.jsonl`);
+        await rm(frozen, { force: true }); // A failed earlier capture may have frozen an older copy.
+        await writeSnapshot(frozen, data.subarray(0, data.lastIndexOf(10) + 1));
+        await add(parent, basename(parent), "lineage", frozen);
+        base = JSON.parse(data.subarray(0, data.indexOf(10)).toString("utf8"))
+          .payload?.history_base;
+      }
     let imageIndex = 0;
     function separateImages(value: unknown): unknown {
       if (Array.isArray(value)) return value.map(separateImages);

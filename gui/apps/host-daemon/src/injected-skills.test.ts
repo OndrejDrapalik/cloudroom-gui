@@ -22,7 +22,7 @@ import type {
 } from "@cloudroom/host-daemon-contract";
 import {
   cleanupInjectedSkillStagingDirs,
-  ensureDataDirSkillsRootPath,
+  ensureUserSkillsRootPath,
   MAX_SKILL_STORE_TREES,
   stageInjectedSkillSources,
 } from "./injected-skills.js";
@@ -187,13 +187,13 @@ function createTreeSource(
   };
 }
 
-describe("data-dir skills root", () => {
-  it("creates the global skills root so the watcher can subscribe", async () => {
-    const dataDir = await makeTempDir();
+describe("user skills root", () => {
+  it("creates ~/.cloudroom/skills so the watcher can subscribe", async () => {
+    const homeDir = await makeTempDir();
 
-    const skillsRootPath = await ensureDataDirSkillsRootPath(dataDir);
+    const skillsRootPath = await ensureUserSkillsRootPath(homeDir);
 
-    expect(skillsRootPath).toBe(path.join(dataDir, "skills"));
+    expect(skillsRootPath).toBe(path.join(homeDir, ".cloudroom", "skills"));
     await expect(
       lstat(skillsRootPath).then((stats) => stats.isDirectory()),
     ).resolves.toBe(true);

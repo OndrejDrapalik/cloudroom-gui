@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
+import { resolveUserSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import type {
   HostDaemonOnlineRpcResult,
   SkillRootKind,
@@ -128,16 +128,13 @@ function isSafeSkillName(name: string): boolean {
   );
 }
 
-function resolveDeletableSkillRoot(
-  args: {
-    scope: CommandOf<"host.delete_skill">["scope"];
-    cwd: string | null;
-    rootPath: string | null;
-  },
-  dataDir: string,
-): string {
+function resolveDeletableSkillRoot(args: {
+  scope: CommandOf<"host.delete_skill">["scope"];
+  cwd: string | null;
+  rootPath: string | null;
+}): string {
   if (args.scope === "bb-user") {
-    return resolveDataDirSkillsRootPath(dataDir);
+    return resolveUserSkillsRootPath(os.homedir());
   }
   if (args.scope === "bb-project") {
     const cwd = args.cwd;
@@ -171,7 +168,7 @@ async function realpathOrNull(targetPath: string): Promise<string | null> {
 
 export async function deleteHostSkill(
   command: CommandOf<"host.delete_skill">,
-  options: { dataDir: string },
+  _options: { dataDir: string },
 ): Promise<HostDaemonOnlineRpcResult<"host.delete_skill">> {
   if (!isSafeSkillName(command.name)) {
     throw new CommandDispatchError(
@@ -179,14 +176,11 @@ export async function deleteHostSkill(
       "Skill name must be a single path segment",
     );
   }
-  const root = resolveDeletableSkillRoot(
-    {
-      scope: command.scope,
-      cwd: command.cwd,
-      rootPath: command.rootPath,
-    },
-    options.dataDir,
-  );
+  const root = resolveDeletableSkillRoot({
+    scope: command.scope,
+    cwd: command.cwd,
+    rootPath: command.rootPath,
+  });
   const skillDirPath = path.join(root, command.name);
 
   const realRoot = await realpathOrNull(root);
@@ -227,7 +221,7 @@ export async function deleteHostSkill(
 
 export async function writeHostSkill(
   command: CommandOf<"host.write_skill">,
-  options: { dataDir: string },
+  _options: { dataDir: string },
 ): Promise<HostDaemonOnlineRpcResult<"host.write_skill">> {
   if (!isSafeSkillName(command.name)) {
     throw new CommandDispatchError(
@@ -235,10 +229,11 @@ export async function writeHostSkill(
       "Skill name must be a single path segment",
     );
   }
-  const root = resolveDeletableSkillRoot(
-    { scope: command.scope, cwd: command.cwd, rootPath: null },
-    options.dataDir,
-  );
+  const root = resolveDeletableSkillRoot({
+    scope: command.scope,
+    cwd: command.cwd,
+    rootPath: null,
+  });
   const realRoot = await realpathOrNull(root);
   const realTarget = await realpathOrNull(path.join(root, command.name));
   if (realRoot === null || realTarget === null) {

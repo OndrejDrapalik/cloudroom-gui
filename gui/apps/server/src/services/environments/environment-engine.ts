@@ -1732,12 +1732,18 @@ export async function advanceEnvironmentProvisioning(
       target.status === "ready" &&
       target.ownerThreadId !== null &&
       target.path !== null
-    )
+    ) {
       await refreshAttachedEnvironmentBranch(deps, {
         environmentId: target.id,
         hostId: target.hostId,
         path: target.path,
       });
+      // A second advance can attach this thread during the await and hand the
+      // folder to the next sibling. This pass is then stale: stop rather than
+      // read that sibling's claim as a conflict (feedback #498, #565, #636).
+      if (getEnvironment(deps.db, target.id)?.ownerThreadId !== threadId)
+        return;
+    }
     assertEnvironmentPathAvailable(deps, { ...target, threadId });
     deps.db.transaction(
       (tx) => {

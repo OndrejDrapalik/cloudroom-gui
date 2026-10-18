@@ -12,7 +12,7 @@ Start a thread, pick Claude Code, and let it work in your repository from Cloudr
 
 Skill tags selected in the composer load their `SKILL.md` instructions before Claude receives the request, anywhere in the message. Repeated tags load once per message; history keeps the original text. Missing or ambiguous skills fail visibly.
 
-This is literal instruction loading, not native skill execution. Native tool/model settings, hooks, shell expansion and `$ARGUMENTS` require native invocation instead: type the leading slash command without selecting a tag. Plain text and unselected commands are unchanged.
+This is literal instruction loading, not native skill execution. `$ARGUMENTS` and `$ARGUMENTS[N]` are filled from the text typed after the tag. Native tool/model settings, hooks, and shell expansion require native invocation instead: type the leading slash command without selecting a tag. Plain text and unselected commands are unchanged.
 
 ## Settings
 

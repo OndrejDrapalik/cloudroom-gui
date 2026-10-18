@@ -1207,7 +1207,7 @@ export function ModelReasoningPicker({
                   <>
                     <div className="shrink-0 border-t border-border" />
                     <div className="shrink-0 p-1">
-                      <div className="flex items-center justify-between gap-3 rounded-sm px-2 py-[0.3125rem] text-xs">
+                      <label className="flex cursor-pointer items-center justify-between gap-3 rounded-sm px-2 py-[0.3125rem] text-xs">
                         <span className="flex min-w-0 items-center gap-2">
                           <Icon
                             name="Zap"
@@ -1224,7 +1224,7 @@ export function ModelReasoningPicker({
                             "[&>span]:size-3.5",
                           )}
                         />
-                      </div>
+                      </label>
                     </div>
                   </>
                 ) : null}

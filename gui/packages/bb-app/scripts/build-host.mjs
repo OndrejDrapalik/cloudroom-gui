@@ -105,7 +105,7 @@ await writeFile(
     {
       name: sourcePackageJson.name,
       version: sourcePackageJson.version,
-      description: "bb enrolled host runtime",
+      description: "Cloudroom enrolled host runtime",
       type: "module",
       os: sourcePackageJson.os,
       bin: {

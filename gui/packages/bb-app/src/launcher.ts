@@ -3177,7 +3177,7 @@ export async function runBbApp(
     env: stripThreadContextEnv(runtime.env),
   });
 
-  process.stdout.write(`\n  ${bold("bb")}\n\n`);
+  process.stdout.write(`\n  ${bold("Cloudroom")}\n\n`);
 
   if (existsSync(runtime.context.daemonLockDir)) {
     warnExistingDaemonLock(runtime.context.daemonLockDir);

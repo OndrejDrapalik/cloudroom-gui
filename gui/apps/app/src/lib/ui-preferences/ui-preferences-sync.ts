@@ -29,6 +29,7 @@ type ValueAtom<Key extends UiPreferenceKey> = WritableAtom<
 >;
 
 interface RegisteredPreference<Key extends UiPreferenceKey> {
+  localCopy?: boolean;
   valueAtom: ValueAtom<Key>;
 }
 
@@ -105,7 +106,7 @@ export function registerSyncedUiPreference<Key extends UiPreferenceKey>(
   if (context === null) return;
   const cached = getCachedUiPreferences(context.queryClient);
   if (cached !== undefined) {
-    reconcileUiPreference(context, key, registration.valueAtom, cached);
+    reconcileUiPreference(context, key, registration, cached);
   }
 }
 
@@ -129,15 +130,15 @@ export function hasPendingUiPreferenceWrite(key: UiPreferenceKey): boolean {
 
 export function reconcileUiPreferences(response: UiPreferencesResponse): void {
   if (context === null) return;
-  for (const [key, { valueAtom }] of registry) {
-    reconcileUiPreference(context, key, valueAtom, response);
+  for (const [key, registration] of registry) {
+    reconcileUiPreference(context, key, registration, response);
   }
 }
 
 function reconcileUiPreference<Key extends UiPreferenceKey>(
   activeContext: UiPreferencesSyncContext,
   key: Key,
-  valueAtom: ValueAtom<Key>,
+  { localCopy, valueAtom }: RegisteredPreference<Key>,
   response: UiPreferencesResponse,
 ): void {
   const state = getSyncState(key);
@@ -146,7 +147,9 @@ function reconcileUiPreference<Key extends UiPreferenceKey>(
   if (entry === undefined) return;
   if (entry.revision === 0 && !state.migrationAttempted) {
     state.migrationAttempted = true;
-    const legacy = readLegacyLocalUiPreference(key);
+    const legacy = localCopy
+      ? activeContext.store.get(valueAtom)
+      : readLegacyLocalUiPreference(key);
     clearLegacyLocalUiPreference(key);
     if (
       legacy !== undefined &&
@@ -253,7 +256,7 @@ async function writeUiPreference<Key extends UiPreferenceKey>(
 function notifySyncFailure(error: unknown): void {
   if (syncFailureNotified) return;
   syncFailureNotified = true;
-  appToast.error("Couldn’t sync sidebar preferences", {
+  appToast.error("Couldn’t sync preferences", {
     description:
       error instanceof Error ? error.message : "Changes stay on this device.",
   });

@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import matter from "gray-matter";
 import { ApiError } from "../../errors.js";
 import { hasSupportedFrontmatterDelimiter } from "./injected-skills.js";
@@ -298,7 +297,7 @@ function installConflict(skillId: string): ApiError {
 }
 
 export async function installServerRegistrySkill(args: {
-  dataDir: string;
+  userSkillsRootPath: string;
   packageRef: string;
   registrySkillId: string;
   skillId: string;
@@ -313,7 +312,7 @@ export async function installServerRegistrySkill(args: {
   const extractionRoot = await fs.mkdtemp(
     path.join(os.tmpdir(), "bb-registry-skill-"),
   );
-  const skillsRootPath = resolveDataDirSkillsRootPath(args.dataDir);
+  const skillsRootPath = args.userSkillsRootPath;
   await fs.mkdir(skillsRootPath, { recursive: true });
   const finalSkillPath = path.join(skillsRootPath, args.skillId);
   const temporarySkillPath = path.join(

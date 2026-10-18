@@ -27,7 +27,7 @@ export function resolveSkillCatalog(
       ...deps.config.inheritedSkillsRootPaths,
       generatedSkillsRootPath(deps.config.dataDir),
     ],
-    dataDir: deps.config.dataDir,
+    userSkillsRootPath: deps.config.userSkillsRootPath,
     pluginSkillRoots: getPluginSkillRootContributions(),
     ...(args.pluginSkillSelections !== undefined
       ? { pluginSkillSelections: args.pluginSkillSelections }

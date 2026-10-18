@@ -111,6 +111,17 @@ export function registerProviderCommands(
                   ...routing,
                   ...(providerId ? { providerId } : {}),
                 });
+          // The server falls back to the first provider for an unknown ID,
+          // which printed Codex's models for a typo (feedback #479).
+          if (
+            providerId &&
+            executionOptions.providers.length > 0 &&
+            !executionOptions.providers.some((entry) => entry.id === providerId)
+          ) {
+            throw new Error(
+              `Unknown provider "${providerId}". Use one of: ${executionOptions.providers.map((entry) => entry.id).join(", ")}.`,
+            );
+          }
           if (opts.restart && executionOptions.modelLoadError) {
             throw new Error(
               `Model discovery still failed for ${providerId}: ${executionOptions.modelLoadError.code}`,

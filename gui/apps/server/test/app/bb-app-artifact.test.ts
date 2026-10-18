@@ -30,7 +30,7 @@ const packageJson = {
     "pino-roll": "4.0.0",
   },
   bin: {
-    bb: "dist/bb.js",
+    "room-cli": "dist/room-cli.js",
     "bb-app": "dist/bb-app.js",
     "bb-host-daemon": "dist/bb-host-daemon.js",
   },
@@ -45,17 +45,17 @@ function isRepoMode(mode: Mode): boolean {
 
 async function writeHostPackage(root: string, readme: string): Promise<void> {
   await mkdir(join(root, "dist"), { recursive: true });
-  await mkdir(join(root, "host-daemon/dist/bb-chunks"), { recursive: true });
+  await mkdir(join(root, "host-daemon/dist/room-cli-chunks"), { recursive: true });
   await writeFile(join(root, "package.json"), JSON.stringify(packageJson));
   await writeFile(join(root, "dist/bb-app.js"), "#!/usr/bin/env node\n");
   await writeFile(
     join(root, "dist/bb-host-daemon.js"),
     "#!/usr/bin/env node\n",
   );
-  await writeFile(join(root, "dist/bb.js"), "#!/usr/bin/env node\n");
+  await writeFile(join(root, "dist/room-cli.js"), "#!/usr/bin/env node\n");
   await writeFile(join(root, "README.md"), readme);
   for (const fileName of [
-    "bb",
+    "room-cli",
     "bb-parcel-watcher-child.mjs",
     "bb-plugin-host-worker.mjs",
     "bb-provider-bridge-worker.mjs",
@@ -64,7 +64,7 @@ async function writeHostPackage(root: string, readme: string): Promise<void> {
     await writeFile(join(root, "host-daemon/dist", fileName), fileName);
   }
   await writeFile(
-    join(root, "host-daemon/dist/bb-chunks/chunk-TEST.js"),
+    join(root, "host-daemon/dist/room-cli-chunks/chunk-TEST.js"),
     "export {};\n",
   );
 }
@@ -122,9 +122,9 @@ describe("bb-app artifact service (desktop packaging)", () => {
           "package/package.json",
           "package/dist/bb-app.js",
           "package/dist/bb-host-daemon.js",
-          "package/dist/bb.js",
-          "package/host-daemon/dist/bb",
-          "package/host-daemon/dist/bb-chunks/chunk-TEST.js",
+          "package/dist/room-cli.js",
+          "package/host-daemon/dist/room-cli",
+          "package/host-daemon/dist/room-cli-chunks/chunk-TEST.js",
           "package/host-daemon/dist/bb-parcel-watcher-child.mjs",
           "package/host-daemon/dist/bb-plugin-host-worker.mjs",
           "package/host-daemon/dist/bb-provider-bridge-worker.mjs",
@@ -211,9 +211,9 @@ describe.each(MODES)("bb-app artifact service (%s)", (mode) => {
       ).stdout.split("\n");
       expect(listing).toContain("package/package.json");
       expect(listing).toContain("package/dist/bb-app.js");
-      expect(listing).toContain("package/dist/bb.js");
+      expect(listing).toContain("package/dist/room-cli.js");
       expect(listing).toContain("package/host-daemon/dist/daemon-bundle.mjs");
-      expect(listing).toContain("package/host-daemon/dist/bb");
+      expect(listing).toContain("package/host-daemon/dist/room-cli");
       expect(listing).not.toContain("package/private.txt");
       expect(listing.some((entry) => entry.startsWith("package/app/"))).toBe(
         false,
@@ -234,7 +234,7 @@ describe.each(MODES)("bb-app artifact service (%s)", (mode) => {
         name: "bb-app",
         version: "1.2.3-test",
         bin: {
-          bb: "dist/bb.js",
+          "room-cli": "dist/room-cli.js",
           "bb-app": "dist/bb-app.js",
           "bb-host-daemon": "dist/bb-host-daemon.js",
         },

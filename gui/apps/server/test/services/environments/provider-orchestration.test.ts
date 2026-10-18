@@ -42,6 +42,7 @@ import { makeHost } from "@cloudroom/test-helpers/domain-fixtures";
 import type { PluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk";
 import { validatePluginEnvironmentProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
 import {
+  advanceEnvironmentProvisioning,
   markProviderEnvironmentAttached,
   cancelProviderEnvironmentCreation,
   sweepProviderEnvironment,
@@ -742,6 +743,76 @@ describe("core environment orchestration", () => {
         environment: { id: target.id, status: "ready" },
         thread: { id: thread.id },
       });
+    }));
+
+  it("stops a stale attach pass once another pass attached the thread and a sibling claimed the folder", async () =>
+    withTestHarness(async (harness) => {
+      // Feedback #498/#565/#636: siblings spawned into one existing checkout.
+      const fixture = setup(harness);
+      const shared = createEnvironment(harness.db, harness.hub, {
+        projectId: fixture.context.project.id,
+        hostId: fixture.host.id,
+        path: "/tmp/project",
+        status: "ready",
+        providerOwnsPath: false,
+      });
+      harness.db
+        .update(environments)
+        .set({ ownerThreadId: fixture.thread.id, claimPath: "/tmp/project" })
+        .where(eq(environments.id, shared.id))
+        .run();
+      saveThreadProvisionContext({
+        db: harness.db,
+        replace: true,
+        threadId: fixture.thread.id,
+        context: createThreadStartup({
+          clientRequestId: encodeClientTurnRequestIdNumber({ value: 1 }),
+          environmentIntent: { type: "reuse", environmentId: shared.id },
+          execution: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            permissionMode: "full",
+            source: "client/turn/requested",
+          },
+          fork: null,
+          input: [],
+          titleProvided: true,
+          seedWithoutRun: false,
+        }),
+      });
+      const sibling = seedThread(harness.deps, {
+        projectId: fixture.context.project.id,
+        status: "starting",
+      });
+      const siblingRow = reserveEnvironment(harness.db, {
+        ...getEnvironment(harness.db, shared.id)!,
+        ownerThreadId: sibling.id,
+        status: "creating" as const,
+        path: null,
+        claimPath: null,
+      });
+      registerTestHostRpcCapture(harness.deps, {
+        hostId: fixture.host.id,
+        sessionId: fixture.session.id,
+        // While this pass waits on the branch refresh, the other pass attaches
+        // the thread and the next sibling takes the folder.
+        onInspectGitSource: () => {
+          markProviderEnvironmentAttached(
+            harness.db,
+            fixture.thread.id,
+            shared.id,
+          );
+          expect(
+            claimEnvironmentPath(harness.db, siblingRow, "/tmp/project"),
+          ).toBe(true);
+        },
+      });
+      await expect(
+        advanceEnvironmentProvisioning(harness.deps, {
+          environmentId: shared.id,
+        }),
+      ).resolves.toBeUndefined();
     }));
 
   it("retains a failed claim through cleanup and releases it only after removal", async () =>

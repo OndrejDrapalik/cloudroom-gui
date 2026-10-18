@@ -216,7 +216,9 @@ interface ResolveActivePruneCandidatesArgs {
 interface AddParentTurnNotificationFollowUpArgs {
   failedParentNotificationThreadIds: Set<string>;
   followUps: EventEffectFollowUp[];
+  failureReason?: string;
   thread: NonNullable<ReturnType<typeof getThread>>;
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
 }
 
@@ -226,6 +228,8 @@ interface ParentTurnNotificationFollowUp {
   projectId: string;
   parentThreadId: string;
   title: string | null;
+  failureReason?: string;
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
 }
 
@@ -371,6 +375,10 @@ function addParentTurnNotificationFollowUp(
     projectId: args.thread.projectId,
     parentThreadId: args.thread.parentThreadId,
     title: args.thread.title,
+    ...(args.failureReason === undefined
+      ? {}
+      : { failureReason: args.failureReason }),
+    ...(args.turnId === undefined ? {} : { turnId: args.turnId }),
     turnStatus: args.turnStatus,
   });
 }
@@ -447,7 +455,11 @@ async function applyEventEffects(
             addParentTurnNotificationFollowUp({
               failedParentNotificationThreadIds,
               followUps,
+              ...(event.status === "failed" && event.error !== undefined
+                ? { failureReason: event.error.message }
+                : {}),
               thread: turnCompleted.thread,
+              turnId,
               turnStatus: event.status,
             });
           }
@@ -484,6 +496,9 @@ async function applyEventEffects(
         if (outcome.applied) {
           addParentTurnNotificationFollowUp({
             failedParentNotificationThreadIds,
+            failureReason: [event.message, event.detail]
+              .filter((part) => part !== undefined && part !== "")
+              .join(": "),
             followUps,
             thread,
             turnStatus: "failed",
@@ -519,6 +534,12 @@ async function executeEventFollowUpBestEffort(
             title: followUp.title,
           },
           parentThreadId: followUp.parentThreadId,
+          ...(followUp.failureReason === undefined
+            ? {}
+            : { failureReason: followUp.failureReason }),
+          ...(followUp.turnId === undefined
+            ? {}
+            : { turnId: followUp.turnId }),
           turnStatus: followUp.turnStatus,
         });
         return;

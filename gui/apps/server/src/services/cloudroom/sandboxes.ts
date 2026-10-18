@@ -219,7 +219,10 @@ export async function macCursorLogin(): Promise<string | null> {
   return login(accessToken, refreshToken);
 }
 
-const output = (command: string, args: string[]) => promisify(execFile)(command, args, { timeout: 10_000 }).then(result => result.stdout.trim(), () => "");
+/** "" on any failure, including spawn errors execFile throws instead of rejecting (an Intel binary without Rosetta). */
+const output = async (command: string, args: string[]) => {
+  try { return (await promisify(execFile)(command, args, { timeout: 10_000 })).stdout.trim(); } catch { return ""; }
+};
 export const githubAccountSchema = z.object({ login: z.string(), name: z.string().nullable(), avatarUrl: z.string().nullable() });
 export type GithubAccount = z.infer<typeof githubAccountSchema>;
 /** This Mac's GitHub CLI token, or "" when `gh` is missing or signed out. */

@@ -55,7 +55,7 @@ function resolveGlobalCliSkills(
 ): HostInstallGlobalSkill[] {
   return resolveServerOwnedSkillCatalogEntries({
     builtinSkillsRootPath: deps.config.builtinSkillsRootPath,
-    dataDir: deps.config.dataDir,
+    userSkillsRootPath: deps.config.userSkillsRootPath,
     logger: deps.logger,
     skillTreeRegistry: deps.skillTreeRegistry,
   }).flatMap(({ provenance, runtimeSource }) =>

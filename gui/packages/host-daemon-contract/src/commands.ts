@@ -357,7 +357,7 @@ export const threadStopCommandSchema = hostDaemonThreadTargetSchema
   })
   .strict();
 
-const teleportFileSchema = z.object({ path: z.string(), size: z.number().int().nonnegative(), sha256: z.string(), kind: z.enum(["native", "context", "project", "attachment"]), executable: z.boolean(), symlink: z.boolean().optional(), origin: z.string().optional() });
+const teleportFileSchema = z.object({ path: z.string(), size: z.number().int().nonnegative(), sha256: z.string(), kind: z.enum(["native", "lineage", "context", "project", "attachment"]), executable: z.boolean(), symlink: z.boolean().optional(), origin: z.string().optional() });
 const threadTeleportCommandSchema = hostDaemonThreadWorkspaceTargetSchema.extend({
   type: z.literal("thread.teleport"),
   transferId: z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/),

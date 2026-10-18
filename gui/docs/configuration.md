@@ -606,8 +606,9 @@ for guidance you want every bb thread to receive regardless of provider.
 
 ## Skills
 
-User-level bb skills live under `<dataDir>/skills/<name>/SKILL.md`; for the
-packaged app this is usually `~/.bb/skills`. Project skills live under
+User-level skills live under `~/.cloudroom/skills/<name>/SKILL.md`, shared by
+every Cloudroom instance on the computer. Older versions kept them in
+`<dataDir>/skills`; the server moves them on start. Project skills live under
 `<workspace>/.bb/skills/<name>/SKILL.md` and override same-named user or plugin
 skills. Running plugins contribute another tier: `skills/<name>/SKILL.md`
 files in an installed plugin (relocatable via the manifest's `bb.skills` field)
@@ -735,9 +736,14 @@ client wrote first, so a stale window cannot silently clobber a newer value.
 | `sidebar.visiblePluginPanels`     | Navigation entries shown, or `null` for every entry |
 | `sidebar.navigationProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
 | `sidebar.threadListProvider`      | Plugin key, `__automatic__`, or `__builtin__`       |
+| `appearance.theme`                | `light`, `dark`, or `system` (default)              |
+| `defaults.startingMachine`        | `cloud` (default) or `last` for the last machine    |
 
 By project (`project`) is the default for `sidebar.organizationMode` when no
 value is saved. Existing server and legacy browser choices are preserved.
+`appearance.theme` and `defaults.startingMachine` also keep a local copy
+(`bb.theme`, `cloudroom.startingMachine`) so each window applies them before the
+server answers; a window's existing local choice moves to the server once.
 
 Read and write them with:
 

@@ -84,6 +84,7 @@ const capabilitiesSchema = z.object({
   structured_prompt: z.boolean().default(false),
   queue_edit: z.boolean().default(false),
   child_threads: z.boolean().default(false),
+  relay: z.boolean().default(false),
   queue_cancel: z.boolean().default(false),
   queue_reorder: z.boolean().default(false),
   steer: z.boolean().default(false),
@@ -397,6 +398,8 @@ class CloudroomService {
   private readonly resumingStarts = new Set<string>();
   private readonly pausedCopies = new Map<string, { job: ProjectCopyJob; landed: Landed; tries: number }>();
   private readonly catchUps = new Map<string, number>();
+  /** Threads whose sandbox address just answered 404 and is being woken again (feedback #596). */
+  private readonly rewoken = new Set<string>();
   /** What sandboxes run, kept apart from a VM's: an account with both starts new threads in sandboxes. */
   private sandboxCapabilities: Capabilities | null = null;
   private readonly secrets: CloudSecrets;
@@ -1303,7 +1306,7 @@ class CloudroomService {
       const before = await this.quietSession(client, saved);
       const start = Object.values(before.receipts).find((receipt) => receipt.command === "start");
       if (!start?.workspace) throw new ApiError(409, "cloudroom_switch", "This thread's cloud folder is unknown, so it can't switch agents.");
-      const startInput = z.object({ parent_session: z.string().nullish(), command_guard_enabled: z.boolean().nullish(), strip_ai_co_authors: z.boolean().nullish(), system_prompt: z.string().nullish() }).passthrough().parse(start.input);
+      const startInput = z.object({ parent_session: z.string().nullish(), parent_thread: z.string().nullish(), command_guard_enabled: z.boolean().nullish(), strip_ai_co_authors: z.boolean().nullish(), system_prompt: z.string().nullish() }).passthrough().parse(start.input);
       if (startInput.parent_session) throw new ApiError(409, "cloudroom_switch", "Agents started by another agent keep their agent.");
       const workspace = start.workspace.id !== "legacy" ? start.workspace.id : start.workspace.path === capabilities.repository ? undefined : ROOT_WORKSPACE;
       if (target.providerId === "codex" && capabilities.codex_auth_import && !sandboxThread(saved.coreUrl)) await importCodexLogin(this.deps);
@@ -1315,6 +1318,7 @@ class CloudroomService {
         ...(capabilities.command_guard && typeof startInput.command_guard_enabled === "boolean" ? { command_guard_enabled: startInput.command_guard_enabled } : {}),
         ...(capabilities.strip_ai_co_authors && typeof startInput.strip_ai_co_authors === "boolean" ? { strip_ai_co_authors: startInput.strip_ai_co_authors } : {}),
         ...(capabilities.system_prompt && startInput.system_prompt ? { system_prompt: startInput.system_prompt } : {}),
+        ...(startInput.parent_thread ? { parent_thread: startInput.parent_thread } : {}),
       });
       const after = await client.session(oldSession).catch(() => null);
       if (after?.last_sequence !== before.last_sequence || !["idle", "error"].includes(getThread(this.deps.db, thread.id)?.status ?? "")) {
@@ -1894,6 +1898,13 @@ class CloudroomService {
         if (harness === "pi") await this.copyPiSetup(client, Boolean(sandbox));
         const fork = cloudForkOf(initial?.input);
         const codeFrom = initial ? z.object({ code_from: z.string().optional() }).parse(JSON.parse(initial.input)).code_from : undefined;
+        // A Cloud parent's child reports its own turns, and takes tell, stop and archive, through the website (ADR 0259).
+        // Only a parent with a sandbox of its own has a link there; children of one sharing a sandbox keep the app's path.
+        const relayed = Boolean(codeFrom && capabilities.relay && binding(this.deps.db, codeFrom)?.coreUrl === SANDBOX_PREFIX + codeFrom);
+        if (relayed && initial && !JSON.parse(initial.input).parent_thread) {
+          this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(initial.input), parent_thread: codeFrom }) }).where(eq(cloudroomCommands.id, initial.id)).run();
+        }
+        const parentThread = relayed ? { parent_thread: codeFrom } : {};
         if (fork && !capabilities.fork) throw new ApiError(503, "cloudroom_update", "Update the cloud core to fork Cloud threads. Your message is saved.");
         const [copy, started] = await Promise.all([
           options.workspace && options.workspace !== ROOT_WORKSPACE ? planProjectCopy(this.deps, client, threadId, options.workspace, { key: sandbox ? `${sandbox}:${options.workspace}` : options.workspace, branch: baseBranch(initial?.input) }) : null,
@@ -1908,7 +1919,7 @@ class CloudroomService {
               const latest = command(this.deps.db, `first_${threadId}`)!;
               this.deps.db.update(cloudroomCommands).set({ input: JSON.stringify({ ...JSON.parse(latest.input), fork: { ...fork, transfer } }) }).where(eq(cloudroomCommands.id, latest.id)).run();
             })
-            : client.start(saved.startRequestId, CLOUD_HARNESSES[harness], { model, reasoning: saved.reasoning, ...options, ...(provider ? { provider } : {}) }).then((accepted) => {
+            : client.start(saved.startRequestId, CLOUD_HARNESSES[harness], { model, reasoning: saved.reasoning, ...options, ...parentThread, ...(provider ? { provider } : {}) }).then((accepted) => {
               const transfer = `child_${threadId}`;
               return { sessionId: accepted.session_id, transfer, code: codeFrom ? threadCode(this.deps, codeFrom, transfer) : null };
             }),
@@ -2074,9 +2085,18 @@ class CloudroomService {
       }
       if (epoch !== this.epoch) return;
       this.setConnectionIssue(threadId, "delivery");
+      this.rewoken.delete(threadId);
       if (pendingCommands.length > 0) this.notify(threadId);
     } catch (error) {
       if (epoch !== this.epoch) return;
+      // A sandbox put to sleep loses its address, so a 404 there means a stale one: forget it and wake it again, once,
+      // instead of failing the thread's start (feedback #596).
+      const sandbox = sandboxThread(saved.coreUrl);
+      if (sandbox && error instanceof CloudroomError && error.status === 404 && !error.code && !this.rewoken.has(threadId)) {
+        this.rewoken.add(threadId);
+        this.sandboxes.forget(sandbox);
+        return;
+      }
       if (error instanceof SandboxAsleep) {
         this.detach(threadId);
         const status = getThread(this.deps.db, threadId)?.status;
@@ -2141,15 +2161,18 @@ class CloudroomService {
   }
 
   /** Reports a child in a sandbox of its own to its Cloud parent, in the words of Core's own child notices, so the
-   *  app shows it as a child report. Called before the child's record counts as read, so a crash can't lose it. */
+   *  app shows it as a child report. Called before the child's record counts as read, so a crash can't lose it.
+   *  Only for children on Cores older than ADR 0259; newer ones report through the website, Mac on or off. */
   private noticeCloudParent(threadId: string, status: ThreadEventTurnStatus | "not_started", turn: string, cause?: string): void {
     const child = getThread(this.deps.db, threadId);
     const parent = this.reportedParent(child);
     if (!child || !parent || !isCloudThread(parent)) return;
+    const first = command(this.deps.db, `first_${child.id}`);
+    if (status !== "not_started" && first && JSON.parse(first.input).parent_thread) return;
     const name = child.title ? `"${child.title}" (${child.id})` : child.id;
     const reply = getLastThreadOutput(this.deps.db, child.id)?.trim();
     const text = status === "completed"
-      ? `[Cloudroom] Child thread ${name} completed:\n\n${reply ? reply.length > 4000 ? `${reply.slice(0, 4000)}\n\n[... reply truncated ...]` : reply : "No final output was recorded."}`
+      ? `[Cloudroom] Child thread ${name} completed:\n\n${reply ? reply.length > 4000 ? `${reply.slice(0, 4000)}\n\n[... reply truncated. Read all of it with \`room-cli thread output ${child.id}\` ...]` : reply : "No final output was recorded."}`
       : status === "interrupted"
         ? `[Cloudroom] Child thread ${name} was interrupted. If the user stopped it, do not restart or replace its work unless they ask.`
         : `[Cloudroom] Child thread ${name} failed or its outcome is uncertain.${cause ? ` Cause: ${cause.trim().replace(/\.$/, "")}.` : ""} ${status === "not_started" ? "It did not start." : "Its turn did not finish; resend the task if it still matters."}`;
@@ -2168,8 +2191,9 @@ class CloudroomService {
   }
 
   /** ADR 0229: a Cloud agent's `room-cli thread spawn` asks the app to start the child in a sandbox of its own
-   *  (Core waits briefly for the answer), and its `tell`, `stop` and `archive` on that child come here too. Both
-   *  are handled before the parent's record counts as read, so a crash replays them instead of losing them. */
+   *  (Core waits briefly for the answer). Cores older than ADR 0259 also send `tell`, `stop` and `archive` on that
+   *  child here; newer ones go through the website. Both are handled before the parent's record counts as read, so
+   *  a crash replays them instead of losing them. */
   private async ownSandboxChild(parent: Binding, client: CloudroomClient, record: SessionRecord): Promise<void> {
     const parentThread = getThread(this.deps.db, parent.threadId);
     if (!parentThread || parentThread.archivedAt || parentThread.deletedAt) return;
@@ -2186,7 +2210,7 @@ class CloudroomService {
       }
       return;
     }
-    const input = z.object({ id: z.string().min(1).max(80), prompt: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), reasoning: z.string().optional(), title: z.string().optional() }).parse(record.data);
+    const input = z.object({ id: z.string().min(1).max(80), prompt: z.string().min(1), provider: z.string().optional(), model: z.string().optional(), reasoning: z.string().optional(), title: z.string().optional(), service_tier: z.enum(["fast", "default"]).optional() }).parse(record.data);
     // One start per request, even when the parent's stream replays it.
     const requestId = `child_${createHash("sha256").update(`${parent.threadId}:${input.id}`).digest("hex").slice(0, 40)}`;
     let child = this.deps.db.select().from(cloudroomThreads).where(eq(cloudroomThreads.startRequestId, requestId)).get()?.threadId ?? null;
@@ -2201,7 +2225,7 @@ class CloudroomService {
         const reasoning = reasoningLevelSchema.safeParse(input.reasoning ?? (same ? parent.reasoning : undefined));
         if (input.reasoning && !reasoning.success) throw new ApiError(400, "cloudroom_reasoning", `Unknown effort level ${input.reasoning}.`);
         child = (await this.create({
-          projectId: parentThread.projectId, providerId, ...(model ? { model } : {}), ...(reasoning.success ? { reasoningLevel: reasoning.data } : {}), ...(input.title ? { title: input.title } : {}),
+          projectId: parentThread.projectId, providerId, ...(model ? { model } : {}), ...(reasoning.success ? { reasoningLevel: reasoning.data } : {}), ...(input.title ? { title: input.title } : {}), ...(input.service_tier ? { serviceTier: input.service_tier } : {}),
           input: [{ type: "text", text: input.prompt, mentions: [] }], parentThreadId: parentThread.id, requestId,
           origin: "cli", environment: { type: "project-default" }, startedOnBehalfOf: null, originKind: null,
         }, true)).id;

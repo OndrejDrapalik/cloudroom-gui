@@ -69,6 +69,7 @@ function createRuntimeConfig(): ServerRuntimeConfig {
     featureFlags: defaultFeatureFlags,
     hostDaemonPort: 38887,
     inheritedSkillsRootPaths: [],
+    userSkillsRootPath: "/tmp/bb-test/skills",
     inferenceFallbackModel: "openai/gpt-4o-mini-fallback",
     inferenceModel: "openai/gpt-4o-mini",
     isDevelopment: false,

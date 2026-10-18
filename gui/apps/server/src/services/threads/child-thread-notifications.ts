@@ -20,13 +20,14 @@ import {
   childOutcomeSystemMessageKind,
   systemMessageKindForTemplate,
 } from "./system-message-kind.js";
-import { getLastThreadOutput } from "./thread-data.js";
+import { getLastThreadOutput, getTurnErrorText } from "./thread-data.js";
 
 export type ChildThreadNotificationSource = ParentSystemThreadMentionSource;
 
 export interface ChildThreadTurnNotificationBatchItem {
   activeWorkflowCount: number;
   childThread: ChildThreadNotificationSource;
+  failureReason?: string | null;
   terminalOutput: string | null;
   turnStatus: ThreadEventTurnStatus;
 }
@@ -61,6 +62,10 @@ interface BuildChildThreadNeedsAttentionInputArgs {
 interface QueueChildThreadTurnNotificationArgs {
   childThread: ChildThreadNotificationSource;
   parentThreadId: string;
+  /** Why the child failed, when the caller already knows (feedback #390). */
+  failureReason?: string | null;
+  /** The turn that just ended; its reply is the only one worth reporting. */
+  turnId?: string;
   turnStatus: ThreadEventTurnStatus;
 }
 
@@ -75,6 +80,8 @@ const CHILD_THREAD_OUTCOME_BATCH_UPDATES_SLOT =
   "__BB_CHILD_THREAD_OUTCOME_BATCH_UPDATES__";
 const CHILD_THREAD_MENTION_SLOT = "__BB_CHILD_THREAD_MENTION__";
 const CHILD_THREAD_TERMINAL_OUTPUT_EXCERPT_CHAR_LIMIT = 4_000;
+const CHILD_THREAD_FAILURE_REASON_CHAR_LIMIT = 1_000;
+const CHILD_THREAD_BATCH_FAILURE_REASON_CHAR_LIMIT = 300;
 const CHILD_THREAD_OUTPUT_TRUNCATION_MARKER = "\n\n[... output truncated ...]";
 const CHILD_THREAD_INSPECTION_GUIDANCE =
   "Review the thread before deciding next steps.";
@@ -127,7 +134,8 @@ function formatChildThreadCompletionOutputExcerpt(
   output: string | null,
 ): string {
   const trimmedOutput = output?.trim();
-  if (!trimmedOutput) {
+  // A reply of only zero-width characters is empty too (feedback #427).
+  if (!trimmedOutput?.replace(/[\u200B-\u200D\u2060\uFEFF]/gu, "")) {
     return "No final output was recorded.";
   }
   return truncateChildThreadOutput(
@@ -181,7 +189,7 @@ function buildSingleChildThreadTurnStatusSegments(
         { kind: "mention", mention: line.mention },
         {
           kind: "text",
-          text: ` failed.\n\n${CHILD_THREAD_INSPECTION_GUIDANCE}`,
+          text: ` failed.${formatChildThreadFailureReason(line.item.failureReason, CHILD_THREAD_FAILURE_REASON_CHAR_LIMIT, "\n\nError: ")}\n\n${CHILD_THREAD_INSPECTION_GUIDANCE}`,
         },
       ];
     case "interrupted":
@@ -210,9 +218,29 @@ function buildChildThreadBatchStatusLineSegments(
     { kind: "mention", mention: line.mention },
     {
       kind: "text",
-      text: ` ${childThreadTurnStatusLabel(line.item.turnStatus)}${workflowClause}.`,
+      text: ` ${childThreadTurnStatusLabel(line.item.turnStatus)}${workflowClause}.${line.item.turnStatus === "failed" ? formatChildThreadFailureReason(line.item.failureReason, CHILD_THREAD_BATCH_FAILURE_REASON_CHAR_LIMIT, " Error: ") : ""}`,
     },
   ];
+}
+
+function formatChildThreadFailureReason(
+  reason: string | null | undefined,
+  limit: number,
+  prefix: string,
+): string {
+  const trimmed = reason?.trim();
+  return trimmed ? `${prefix}${truncateChildThreadOutput(trimmed, limit)}` : "";
+}
+
+function getChildThreadFailureReason(
+  deps: LoggedPendingInteractionWorkSessionDeps,
+  args: QueueChildThreadTurnNotificationArgs,
+): string | null {
+  if (args.turnStatus !== "failed") return null;
+  if (args.failureReason) return args.failureReason;
+  return args.turnId === undefined
+    ? null
+    : getTurnErrorText(deps.db, args.childThread.id, args.turnId);
 }
 
 function getChildThreadCompletionOutput(
@@ -222,7 +250,7 @@ function getChildThreadCompletionOutput(
   if (args.turnStatus !== "completed") {
     return null;
   }
-  return getLastThreadOutput(deps.db, args.childThread.id);
+  return getLastThreadOutput(deps.db, args.childThread.id, args.turnId);
 }
 
 function getChildThreadActiveWorkflowCount(
@@ -404,6 +432,7 @@ function queueChildThreadTurnNotificationBatchItem(
   const item: ChildThreadTurnNotificationBatchItem = {
     activeWorkflowCount: getChildThreadActiveWorkflowCount(deps, args),
     childThread: args.childThread,
+    failureReason: getChildThreadFailureReason(deps, args),
     terminalOutput: getChildThreadCompletionOutput(deps, args),
     turnStatus: args.turnStatus,
   };

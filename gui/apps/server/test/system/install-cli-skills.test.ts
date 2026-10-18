@@ -26,7 +26,7 @@ async function writeBuiltinCliSkill(harness: TestAppHarness): Promise<void> {
 function expectedCliSkillTreeHash(harness: TestAppHarness): string {
   const entry = resolveServerOwnedSkillCatalogEntries({
     builtinSkillsRootPath: harness.deps.config.builtinSkillsRootPath,
-    dataDir: harness.deps.config.dataDir,
+    userSkillsRootPath: harness.deps.config.userSkillsRootPath,
     logger: harness.deps.logger,
     skillTreeRegistry: harness.deps.skillTreeRegistry,
   }).find(({ runtimeSource }) => runtimeSource.name === "room-cli");

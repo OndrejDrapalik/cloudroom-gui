@@ -9,7 +9,7 @@ import type { SdkSessionOptions } from "./sdk-session.js";
 const MAX_INPUT_BYTES = 16 * 1024 * 1024;
 const NATIVE_FIELDS =
   /(?:^|\n)\s*["']?(?:allowed-tools|disallowed-tools|model|effort|context|agent|background|hooks|shell|arguments|user-invocable)["']?\s*:/u;
-const NATIVE_BODY = /!`|\$ARGUMENTS\b|\$\{CLAUDE_/u;
+const NATIVE_BODY = /!`|\$\{CLAUDE_/u;
 
 type Skill = { name: string; origin: "user" | "project" | "builtin" };
 type Root = {
@@ -112,6 +112,17 @@ function instructionBody(content: string, name: string): string {
   return body;
 }
 
+function withArguments(body: string, args: string): string {
+  const words = [...args.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/gu)].map(
+    (match) => match[1] ?? match[2] ?? match[3]!,
+  );
+  return body.replace(
+    /\$ARGUMENTS(?:\[(\d+)\]|\b)/gu,
+    (_, index?: string) =>
+      index === undefined ? args : (words[Number(index)] ?? ""),
+  );
+}
+
 async function loadSkill(
   skill: Skill,
   roots: readonly Root[],
@@ -170,9 +181,13 @@ export async function expandClaudeSkillInput(
     }
     let text = "";
     let cursor = 0;
-    for (const mention of [...part.mentions].sort(
-      (a, b) => a.start - b.start,
-    )) {
+    const mentions = part.mentions
+      .filter(
+        ({ resource }) =>
+          resource.kind === "command" && resource.source === "skill",
+      )
+      .sort((a, b) => a.start - b.start);
+    for (const [index, mention] of mentions.entries()) {
       const skill = mention.resource;
       if (skill.kind !== "command" || skill.source !== "skill") continue;
       if (
@@ -188,7 +203,10 @@ export async function expandClaudeSkillInput(
       if (!resolved.has(key)) resolved.set(key, await loadSkill(skill, roots));
       const { file, body } = resolved.get(key)!;
       if (!loaded.has(file)) {
-        const block = `Skill: /${skill.name}\nBase directory: ${dirname(file)}\n\n${body}`;
+        const args = part.text
+          .slice(mention.end, mentions[index + 1]?.start)
+          .trim();
+        const block = `Skill: /${skill.name}\nBase directory: ${dirname(file)}\n\n${withArguments(body, args)}`;
         remaining -= Buffer.byteLength(block);
         if (remaining < 0)
           throw new Error(

@@ -185,12 +185,28 @@ export function throwProjectUnavailable(
   });
 }
 
+// The CLI prints only the message, so it carries the reason (feedback #510).
+const PARENT_THREAD_INVALID_REASON_TEXT: Record<
+  ParentThreadInvalidReason,
+  string
+> = {
+  not_found: "it was not found",
+  archived: "it is archived",
+  deleted: "it was deleted",
+  self: "a thread cannot be its own parent",
+  cycle: "it is a child of this thread",
+  too_deep: "thread nesting is limited to 4 levels",
+};
+
 export function throwParentThreadInvalid(
   reason: ParentThreadInvalidReason,
 ): never {
-  throw new ApiError(400, "parent_thread_invalid", "Parent thread is invalid", {
-    details: parentThreadInvalidDetails({ reason, subject: "parent" }),
-  });
+  throw new ApiError(
+    400,
+    "parent_thread_invalid",
+    `Parent thread is invalid: ${PARENT_THREAD_INVALID_REASON_TEXT[reason]}`,
+    { details: parentThreadInvalidDetails({ reason, subject: "parent" }) },
+  );
 }
 
 export function throwSenderThreadInvalid(

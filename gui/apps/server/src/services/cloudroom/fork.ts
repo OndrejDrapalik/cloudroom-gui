@@ -8,7 +8,7 @@ import { ApiError } from "../../errors.js";
 import { UPLOAD_PART, type CloudroomClient, type Harness, type TeleportManifest } from "./client.js";
 import { cloudroom } from "./commands.js";
 import { binding } from "./store.js";
-import { download, findNative, vm } from "./teleport-local.js";
+import { codexLineage, download, findNative, vm } from "./teleport-local.js";
 
 /** A Cloud fork: a new Cloud thread, in its own sandbox, that continues another Cloud thread's conversation
  *  from a chosen turn, with that thread's code (docs/scopes/sandboxes.md). Saved in the fork's first message. */
@@ -79,15 +79,21 @@ export async function startCloudFork(
   if (!path) throw new ApiError(409, "fork_source_unavailable", "The source conversation file was not found in its sandbox.");
   const file = await download(from, path);
   // The source may be writing its next turn; a partial last line is not part of the fork.
-  const data = file.subarray(0, file.lastIndexOf(10) + 1);
-  const sha256 = createHash("sha256").update(data).digest("hex");
+  const files: { path: string; kind: "native" | "lineage"; data: Buffer }[] = [{ path, kind: "native", data: file.subarray(0, file.lastIndexOf(10) + 1) }];
+  // A source that is itself a Codex fork (a rewind) needs its parent files too.
+  for (const parent of harness === "codex" ? await codexLineage(from, path) : [])
+    files.push({ path: parent, kind: "lineage", data: await download(from, parent) });
+  if (files.length > 1 && (await client.capabilities()).teleport_lineage !== true)
+    throw new ApiError(409, "fork_update", "Forking this Codex chat needs a newer cloud core. Try again after the next Cloudroom update.");
+  const entries = files.map((entry) => ({ ...entry, sha256: createHash("sha256").update(entry.data).digest("hex") }));
   saveTransfer(transfer);
   await client.prepareTeleport({
     ...start, request_id: transfer, harness: harness as Harness, native_id: source.nativeId, handoff: "", queued: [], fork: true,
-    files: [{ path: basename(path), size: data.length, sha256, kind: "native", executable: false }],
+    files: entries.map((entry) => ({ path: basename(entry.path), size: entry.data.length, sha256: entry.sha256, kind: entry.kind, executable: false })),
   });
-  for (let offset = 0; offset < data.length; offset += PART)
-    await client.uploadTeleport(transfer, 0, offset, sha256, data.subarray(offset, offset + PART), data.length);
+  for (const [index, entry] of entries.entries())
+    for (let offset = 0; offset < entry.data.length; offset += PART)
+      await client.uploadTeleport(transfer, index, offset, entry.sha256, entry.data.subarray(offset, offset + PART), entry.data.length);
   const sessionId = (await client.activateTeleport(transfer)).session_id;
   if (!sessionId) throw new ApiError(503, "fork_start_failed", "The fork's sandbox did not start its agent.");
   await idle(client, sessionId);

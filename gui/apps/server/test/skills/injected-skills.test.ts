@@ -202,7 +202,7 @@ describe("injected skill source discovery", () => {
     const { logger } = createCapturingLogger();
 
     const sources = await resolveInjectedSkillSources(logger, {
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
     });
 
     expect(sources).toEqual([
@@ -234,7 +234,7 @@ describe("injected skill source discovery", () => {
 
     expect(
       resolveInjectedSkillSources(logger, {
-        dataDir,
+        userSkillsRootPath: path.join(dataDir, "skills"),
       }),
     ).toEqual([]);
     expect(warnings).toEqual([
@@ -266,7 +266,7 @@ describe("injected skill source discovery", () => {
 
     expect(
       resolveInjectedSkillSources(logger, {
-        dataDir,
+        userSkillsRootPath: path.join(dataDir, "skills"),
       }),
     ).toEqual([]);
     expect(warnings[0]?.context).toMatchObject({
@@ -292,7 +292,7 @@ describe("injected skill source discovery", () => {
 
     const sources = await resolveInjectedSkillSources(logger, {
       additionalSkillsRootPaths: [inheritedSkillsRootPath],
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
     });
 
     expect(sources).toEqual([
@@ -329,7 +329,7 @@ describe("injected skill source discovery", () => {
     const { logger } = createCapturingLogger();
 
     const sources = resolveInjectedSkillSources(logger, {
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
       sharedSkillSources: [
         {
           kind: "host-path",
@@ -385,7 +385,7 @@ describe("injected skill source discovery", () => {
 
     const sources = await resolveInjectedSkillSources(logger, {
       additionalSkillsRootPaths: [inheritedSkillsRootPath],
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
     });
 
     expect(sources).toEqual([
@@ -423,7 +423,7 @@ describe("injected skill source discovery", () => {
 
     const sources = await resolveInjectedSkillSources(logger, {
       additionalSkillsRootPaths: [parentSkillsRootPath, prodSkillsRootPath],
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
     });
 
     expect(sources).toEqual([
@@ -465,7 +465,7 @@ describe("injected skill source discovery", () => {
     expect(projectSkillSource).not.toBeNull();
 
     const sources = resolveInjectedSkillSources(logger, {
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
       projectSkillSources:
         projectSkillSource === null ? [] : [projectSkillSource],
     });
@@ -489,7 +489,7 @@ describe("injected skill source discovery", () => {
 
     const sources = resolveServerOwnedSkillCatalogEntries({
       builtinSkillsRootPath: resolveBuiltinSkillsRootPath(),
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
       logger,
       skillTreeRegistry: new SkillTreeRegistry(),
     })
@@ -523,7 +523,7 @@ describe("injected skill source discovery", () => {
     const { logger } = createCapturingLogger();
     const entries = resolveServerOwnedSkillCatalogEntries({
       builtinSkillsRootPath,
-      dataDir,
+      userSkillsRootPath: path.join(dataDir, "skills"),
       logger,
       skillTreeRegistry: new SkillTreeRegistry(),
     });

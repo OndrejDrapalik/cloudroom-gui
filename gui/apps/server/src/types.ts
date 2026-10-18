@@ -37,6 +37,8 @@ export interface ServerRuntimeConfig {
   serverPort: number;
   sharedSkillRoots: ProviderNativeSkillRoots;
   transcriptionModel: string;
+  /** Cloudroom's own user skills folder, `~/.cloudroom/skills`. */
+  userSkillsRootPath: string;
   appUrl?: string;
   devAppPort?: number;
   launchId?: string;

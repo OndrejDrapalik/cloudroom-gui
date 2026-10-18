@@ -255,6 +255,15 @@ describe("PluginProviderModelPicker", () => {
         serviceTier: "default",
       }),
     );
+    fireEvent.click(screen.getByText("Fast mode"));
+    await waitFor(() =>
+      expect(onChange).toHaveBeenLastCalledWith({
+        providerId: "codex",
+        model: "gpt-light",
+        reasoningLevel: "low",
+        serviceTier: "fast",
+      }),
+    );
 
     fireEvent.click(screen.getByTitle("Claude Code"));
     await waitFor(() =>

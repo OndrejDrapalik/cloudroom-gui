@@ -660,6 +660,22 @@ export async function createThreadFromRequest(
     projectId: requestInput.projectId,
   });
   await deps.providerRegistry.whenRegistrationsSettled();
+  // A typo like `--provider claude` used to spawn threads that all failed
+  // later at setup (feedback #369).
+  if (requestInput.providerId !== undefined) {
+    await deps.providerRegistry.whenProviderRegistered(requestInput.providerId);
+    if (deps.providerRegistry.get(requestInput.providerId) === null) {
+      const known = deps.providerRegistry
+        .list()
+        .map((entry) => entry.info.id)
+        .join(", ");
+      throw new ApiError(
+        400,
+        "invalid_request",
+        `Unknown provider "${requestInput.providerId}". Use one of: ${known}.`,
+      );
+    }
+  }
   const {
     executionDefaults,
     providerId,

@@ -85,6 +85,7 @@ import { computeTimelineRowDelta } from "@cloudroom/server-contract";
 import {
   findThreadEvent,
   getLastThreadOutput,
+  getTurnErrorText,
   listThreadEventRows,
 } from "../../services/threads/thread-data.js";
 import { listThreadPromptHistory } from "../../services/prompt-history.js";
@@ -568,9 +569,12 @@ export function registerThreadDataRoutes(app: Hono, deps: AppDeps): void {
   });
 
   get(routes.output, (context) => {
-    requirePublicThread(deps.db, context.req.param("id"));
+    const thread = requirePublicThread(deps.db, context.req.param("id"));
     return context.json({
-      output: getLastThreadOutput(deps.db, context.req.param("id")),
+      output: getLastThreadOutput(deps.db, thread.id),
+      // `thread show` reports why a thread failed (feedback #571, #390).
+      error:
+        thread.status === "error" ? getTurnErrorText(deps.db, thread.id) : null,
     });
   });
 

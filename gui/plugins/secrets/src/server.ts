@@ -193,6 +193,7 @@ async function runRequest(
           description: parsed.descriptions.get(name) ?? null,
         })),
       },
+      timeoutMs: 30 * 60_000,
     },
     { signal: ctx.signal },
   );

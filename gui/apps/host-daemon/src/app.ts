@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { startDesktopBrowserBroker } from "./desktop-browser-broker.js";
 import { MachineEnvironment } from "./machine-environment.js";
 import { CommandRouter } from "./command-router.js";
@@ -33,7 +34,7 @@ import {
 } from "./server-client.js";
 import {
   cleanupInjectedSkillStagingDirs,
-  ensureDataDirSkillsRootPath,
+  ensureUserSkillsRootPath,
 } from "./injected-skills.js";
 import {
   ServerConnection,
@@ -213,9 +214,7 @@ export async function createHostDaemonApp(
     options.runtimeShellEnv ?? {},
   );
   const threadStorageRootPath = await ensureThreadStorageRoot(options.dataDir);
-  const dataDirSkillsRootPath = await ensureDataDirSkillsRootPath(
-    options.dataDir,
-  );
+  const dataDirSkillsRootPath = await ensureUserSkillsRootPath(homedir());
   await cleanupInjectedSkillStagingDirs({
     dataDir: options.dataDir,
     keepCatalogHashes: [],

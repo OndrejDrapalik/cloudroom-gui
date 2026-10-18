@@ -220,6 +220,7 @@ export async function createTestAppHarness(
     hostDaemonPort: 3001,
     marketplaceUrl: "https://marketplace.invalid/marketplace.json",
     inheritedSkillsRootPaths: [],
+    userSkillsRootPath: join(dataDir, "skills"),
     inferenceFallbackModel: "test/mock-fallback-model",
     inferenceModel: "test/mock-model",
     isDevelopment: true,

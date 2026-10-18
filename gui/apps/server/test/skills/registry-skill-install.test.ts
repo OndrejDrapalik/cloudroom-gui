@@ -72,7 +72,7 @@ describe("installServerRegistrySkill", () => {
       stubDownloadedSkill("find-skills");
 
       const result = await installServerRegistrySkill({
-        dataDir,
+        userSkillsRootPath: join(dataDir, "skills"),
         packageRef: "vercel-labs/skills",
         registrySkillId: "github.com/vercel-labs/skills/find-skills",
         skillId: "find-skills",
@@ -105,7 +105,7 @@ describe("installServerRegistrySkill", () => {
       stubDownloadedSkill("find-skills");
 
       const result = await installServerRegistrySkill({
-        dataDir,
+        userSkillsRootPath: join(dataDir, "skills"),
         packageRef: "vercel-labs/skills",
         registrySkillId: "github.com/vercel-labs/skills/find-skills",
         skillId: "find-skills",
@@ -135,7 +135,7 @@ describe("installServerRegistrySkill", () => {
 
       await expect(
         installServerRegistrySkill({
-          dataDir,
+          userSkillsRootPath: join(dataDir, "skills"),
           packageRef: "vercel-labs/skills",
           registrySkillId: "github.com/vercel-labs/skills/find-skills",
           skillId: "find-skills",
@@ -167,7 +167,7 @@ describe("installServerRegistrySkill", () => {
 
       await expect(
         installServerRegistrySkill({
-          dataDir,
+          userSkillsRootPath: join(dataDir, "skills"),
           packageRef: "vercel-labs/skills",
           registrySkillId: "github.com/vercel-labs/skills/find-skills",
           skillId: "find-skills",
@@ -189,7 +189,7 @@ describe("installServerRegistrySkill", () => {
     try {
       await expect(
         installServerRegistrySkill({
-          dataDir,
+          userSkillsRootPath: join(dataDir, "skills"),
           packageRef: "vercel-labs/skills",
           registrySkillId: "github.com/vercel-labs/skills/find-skills",
           skillId: "../find-skills",
@@ -216,7 +216,7 @@ describe("installServerRegistrySkill", () => {
 
       await expect(
         installServerRegistrySkill({
-          dataDir,
+          userSkillsRootPath: join(dataDir, "skills"),
           packageRef: "vercel-labs/skills",
           registrySkillId: "github.com/vercel-labs/skills/find-skills",
           skillId: "find-skills",

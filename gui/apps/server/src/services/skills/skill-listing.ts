@@ -2,7 +2,6 @@ import { Buffer } from "node:buffer";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { resolveDataDirSkillsRootPath } from "@cloudroom/config/skill-storage-paths";
 import type { DiscoveredSkill, SkillRootKind } from "@cloudroom/host-daemon-contract";
 import type {
   SkillProvider,
@@ -158,14 +157,14 @@ function skillId(identitySeed: string, logicalPath: string): string {
 function listServerOwnedSkills(deps: AppDeps): SkillSummary[] {
   return resolveServerOwnedSkillCatalogEntries({
     builtinSkillsRootPath: null,
-    dataDir: deps.config.dataDir,
+    userSkillsRootPath: deps.config.userSkillsRootPath,
     logger: deps.logger,
     skillTreeRegistry: deps.skillTreeRegistry,
   })
     .map(({ runtimeSource }): SkillSummary | null => {
       if (runtimeSource.kind !== "tree") return null;
       const rootPath = path.join(
-        resolveDataDirSkillsRootPath(deps.config.dataDir),
+        deps.config.userSkillsRootPath,
         runtimeSource.name,
       );
       const logicalPath = `${runtimeSource.name}/${runtimeSource.entryPath}`;
@@ -264,7 +263,7 @@ function isServerOwnedSkill(deps: AppDeps, skill: SkillSummary): boolean {
   if (skill.scope === "bb-user") {
     return (
       path.dirname(skillDirectoryPath) ===
-      resolveDataDirSkillsRootPath(deps.config.dataDir)
+      deps.config.userSkillsRootPath
     );
   }
   return (
@@ -582,7 +581,7 @@ export async function deleteProjectSkill(
     );
   }
   if (editableScope.data === "bb-user" && isServerOwnedSkill(deps, skill)) {
-    const skillsRootPath = resolveDataDirSkillsRootPath(deps.config.dataDir);
+    const skillsRootPath = deps.config.userSkillsRootPath;
     const skillDirectoryPath = path.dirname(skill.filePath);
     const [realRootPath, realSkillPath] = await Promise.all([
       fs.realpath(skillsRootPath).catch(() => null),

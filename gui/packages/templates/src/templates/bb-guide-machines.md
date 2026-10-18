@@ -15,6 +15,10 @@ Rust core. Do not add that VM as a native machine or configure a remote cloudroo
 `room-cli cloud cancel` cancels pending login. `room-cli cloud logout` removes local
 VM credentials without stopping remote agents or erasing local history.
 The SDK equivalents are `sdk.cloudroom.signIn`, `.status`, `.cancel`, and `.logout`.
+`room-cli cloud env list|set|unset`, `cloud repo add|remove`, and `cloud setup set`
+manage the API keys, repos, and setup script every new cloud sandbox gets; values
+come from stdin. `room-cli cloud auto-delete [days|never]` shows or sets how long
+unused cloud threads are kept.
 Existing cloud threads keep their account, core URL, and project bindings.
 A rejected cloud start keeps its prompt but stops retrying automatically. Use
 `room-cli cloud retry-start THREAD` or `sdk.cloudroom.retryStart(threadId)` to retry

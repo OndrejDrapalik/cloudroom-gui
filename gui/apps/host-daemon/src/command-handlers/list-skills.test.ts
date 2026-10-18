@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ProviderNativeRoot,
   ProviderNativeRootSet,
@@ -577,9 +577,17 @@ describe("discoverSkills marks the linked flag per root shape", () => {
 });
 
 describe("deleteHostSkill", () => {
+  // bb-user skills live in ~/.cloudroom/skills.
+  beforeEach(() => {
+    vi.stubEnv("HOME", path.join(tempRoot, "home"));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("deletes a bb-user skill directory", async () => {
     const fixture = await makeWorkspaceFixture();
-    const skillDir = path.join(fixture.dataDir, "skills", "doomed");
+    const skillDir = path.join(fixture.homeDir, ".cloudroom", "skills", "doomed");
     await writeSkill(path.join(skillDir, "SKILL.md"), "doomed");
 
     const result = await deleteHostSkill(
@@ -656,7 +664,7 @@ describe("deleteHostSkill", () => {
     const fixture = await makeWorkspaceFixture();
     const outside = path.join(tempRoot, "outside", "secret");
     await writeSkill(path.join(outside, "SKILL.md"), "secret");
-    const skillsRoot = path.join(fixture.dataDir, "skills");
+    const skillsRoot = path.join(fixture.homeDir, ".cloudroom", "skills");
     await mkdir(skillsRoot, { recursive: true });
     await symlink(outside, path.join(skillsRoot, "link"));
 
@@ -679,7 +687,7 @@ describe("deleteHostSkill", () => {
 
   it("refuses a skill symlinked to a sibling inside the same root", async () => {
     const fixture = await makeWorkspaceFixture();
-    const skillsRoot = path.join(fixture.dataDir, "skills");
+    const skillsRoot = path.join(fixture.homeDir, ".cloudroom", "skills");
     await writeSkill(path.join(skillsRoot, "real", "SKILL.md"), "real");
     await symlink(
       path.join(skillsRoot, "real"),
@@ -705,7 +713,7 @@ describe("deleteHostSkill", () => {
 
   it("reports skill_not_found for a missing skill", async () => {
     const fixture = await makeWorkspaceFixture();
-    await mkdir(path.join(fixture.dataDir, "skills"), { recursive: true });
+    await mkdir(path.join(fixture.homeDir, ".cloudroom", "skills"), { recursive: true });
     await expect(
       deleteHostSkill(
         {
@@ -722,7 +730,7 @@ describe("deleteHostSkill", () => {
 
   it("refuses a directory that is not a skill (no SKILL.md)", async () => {
     const fixture = await makeWorkspaceFixture();
-    const notSkill = path.join(fixture.dataDir, "skills", "plain");
+    const notSkill = path.join(fixture.homeDir, ".cloudroom", "skills", "plain");
     await mkdir(notSkill, { recursive: true });
     await writeFile(path.join(notSkill, "README.md"), "not a skill", "utf8");
 
@@ -743,9 +751,17 @@ describe("deleteHostSkill", () => {
 });
 
 describe("writeHostSkill", () => {
+  // bb-user skills live in ~/.cloudroom/skills.
+  beforeEach(() => {
+    vi.stubEnv("HOME", path.join(tempRoot, "home"));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("atomically replaces a bb skill only at the expected revision", async () => {
     const fixture = await makeWorkspaceFixture();
-    const filePath = path.join(fixture.dataDir, "skills", "review", "SKILL.md");
+    const filePath = path.join(fixture.homeDir, ".cloudroom", "skills", "review", "SKILL.md");
     const original = "---\nname: review\ndescription: Review\n---\n";
     await mkdir(path.dirname(filePath), { recursive: true });
     await writeFile(filePath, original, "utf8");

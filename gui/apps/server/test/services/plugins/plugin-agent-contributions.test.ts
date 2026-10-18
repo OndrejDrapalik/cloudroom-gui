@@ -156,7 +156,7 @@ describe("plugin skills tier", () => {
 
     const skillTreeRegistry = new SkillTreeRegistry();
     const entries = resolveSkillCatalogEntries(testLogger, {
-      dataDir,
+      userSkillsRootPath: join(dataDir, "skills"),
       pluginSkillRoots: service.listSkillRootContributions(),
       projectSkillSources: [projectGammaSource],
       skillTreeRegistry,
@@ -197,7 +197,7 @@ describe("plugin skills tier", () => {
       { pluginId: "relocated", rootPath: join(rootDir, "custom") },
     ]);
     const sources = resolveSkillCatalogEntries(testLogger, {
-      dataDir: join(workDir, "data"),
+      userSkillsRootPath: join(join(workDir, "data"), "skills"),
       pluginSkillRoots: service.listSkillRootContributions(),
       skillTreeRegistry: new SkillTreeRegistry(),
     }).map((entry) => entry.runtimeSource);
@@ -213,7 +213,7 @@ describe("plugin skills tier", () => {
 
     const resolve = () =>
       resolveSkillCatalogEntries(testLogger, {
-        dataDir: join(workDir, "data"),
+        userSkillsRootPath: join(join(workDir, "data"), "skills"),
         pluginSkillRoots: service.listSkillRootContributions(),
         skillTreeRegistry: new SkillTreeRegistry(),
       }).map((entry) => entry.runtimeSource.name);

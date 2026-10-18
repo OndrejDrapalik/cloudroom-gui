@@ -163,6 +163,8 @@ export type ThreadSearchResult = ThreadSearchResponse;
 export type ThreadResolveMentionsResult = ResolveThreadMentionsResponse;
 export interface ThreadOutputResponse {
   output: string | null;
+  /** Why the thread failed; null unless its status is `error`. */
+  error?: string | null;
 }
 export type ThreadMutationResult = ThreadResponse;
 export type ThreadPluginMetadataResult = ThreadPluginMetadataResponse;

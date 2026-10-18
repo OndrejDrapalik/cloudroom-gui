@@ -87,6 +87,8 @@ const openCloudChild = (child: { id: string; title: string | null }) =>
     "teleport_unavailable",
     `Teleport can't move a thread with an open Cloud child yet. Archive ${child.title ?? child.id} first, or keep this thread Local.`,
   );
+// Session text: the cloud agent starts only after these files arrive.
+const TEXT = ["native", "lineage", "context"];
 const services = new WeakMap<AppDeps["db"], Teleport>();
 export function teleports(deps: AppDeps): Teleport {
   let service = services.get(deps.db);
@@ -840,6 +842,15 @@ class Teleport {
         throw new Error(
           "Local capture returned no complete conversation. Update the local host before retrying.",
         );
+      if (
+        capability.teleport_lineage !== true &&
+        capture.files.some((file) => file.kind === "lineage")
+      )
+        throw new ApiError(
+          409,
+          "teleport_update",
+          "This Codex chat is a fork, which needs a newer cloud core to teleport. The local task is stopped and preserved.",
+        );
       const thread = getThread(this.deps.db, state.threadId)!;
       const project = getProject(this.deps.db, thread.projectId)!;
       const separator = state.model.indexOf("/");
@@ -962,7 +973,7 @@ class Teleport {
     };
     const files = state.manifest!.files;
     for (let i = 0; i < files.length; i++)
-      if (["native", "context"].includes(files[i]!.kind) && !(await upload(i)))
+      if (TEXT.includes(files[i]!.kind) && !(await upload(i)))
         return;
     if (await cancelled()) return;
     state = { ...this.load(id), activationRequested: true };
@@ -973,7 +984,7 @@ class Teleport {
     remote = await client.activateTeleport(id, state.retryRequestId);
     await this.bind(state, remote);
     for (let i = 0; i < files.length; i++)
-      if (!["native", "context"].includes(files[i]!.kind) && !(await upload(i)))
+      if (!TEXT.includes(files[i]!.kind) && !(await upload(i)))
         return;
     remote = await client.teleportStatus(id);
     const attempt = state.retryRequestId

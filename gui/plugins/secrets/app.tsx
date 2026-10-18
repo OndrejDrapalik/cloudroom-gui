@@ -19,6 +19,10 @@ import {
 } from "@cloudroom/plugin-interaction-contracts";
 import { reconcileDotenv } from "./src/dotenv.js";
 
+// Pasted keys often carry spaces or zero-width characters at the edges.
+// Strip only those; never change anything inside the value.
+const EDGE_JUNK = /^[\s\u200B-\u200D\u2060\uFEFF]+|[\s\u200B-\u200D\u2060\uFEFF]+$/gu;
+
 function SecretRequestInteraction({
   interaction,
   submit,
@@ -50,7 +54,15 @@ function SecretRequestInteraction({
   }
   const payload = parsed.data;
   const submitValues = async () => {
-    const validated = secretRequestResponseSchema.safeParse({ values });
+    const trimmed = Object.fromEntries(
+      Object.entries(values).map(([name, value]) => [
+        name,
+        value.replace(EDGE_JUNK, ""),
+      ]),
+    );
+    const validated = secretRequestResponseSchema.safeParse({
+      values: trimmed,
+    });
     if (!validated.success) {
       setFormError(
         "Every secret must be a non-empty single-line value no larger than 16 KiB.",
@@ -69,7 +81,7 @@ function SecretRequestInteraction({
     setBusy(true);
     try {
       try {
-        await submit({ values });
+        await submit({ values: validated.data.values });
         setValues({});
       } catch {}
     } finally {

@@ -9,7 +9,7 @@ import {
   getWrappedImageIndex,
   ImageLightbox,
 } from "@/components/ui/image-lightbox.js";
-import { Icon } from "@cloudroom/shared-ui/icon";
+import { Icon, type IconName } from "@cloudroom/shared-ui/icon";
 import type { PromptDraftAttachment } from "@cloudroom/client-core";
 import { toUserAttachmentImageSrc } from "@/lib/user-attachment-images";
 import {
@@ -25,6 +25,38 @@ export function resolveAttachmentPreviewSrc(
     getLocalAttachmentPreviewSrc(path) ??
     toUserAttachmentImageSrc(path, attachmentProjectId)
   );
+}
+
+const FILE_TYPES: Array<[RegExp, IconName, string]> = [
+  [/^pdf$/, "FileText", "text-red-400"],
+  [/^(xlsx?|csv|tsv|numbers|ods)$/, "FileSpreadsheet", "text-emerald-400"],
+  [/^(zip|tar|gz|tgz|rar|7z|bz2|xz)$/, "FileZip", "text-amber-400"],
+  [/^(docx?|rtf|pages|odt|pptx?|key)$/, "FileText", "text-sky-400"],
+  [/^(mp3|wav|m4a|aac|flac|ogg)$/, "FileAudio", "text-pink-400"],
+  [/^(mp4|mov|webm|mkv|avi)$/, "FileVideo", "text-pink-400"],
+  [
+    /^(ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|swift|c|cc|cpp|h|hpp|cs|php|sh|zsh|sql|json|ya?ml|toml|xml|html?|css|scss|vue|svelte)$/,
+    "FileCode",
+    "text-violet-400",
+  ],
+];
+
+export function AttachmentFileIcon({ name }: { name: string }) {
+  const dot = name.lastIndexOf(".");
+  const extension = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  const match = FILE_TYPES.find(([pattern]) => pattern.test(extension));
+  return (
+    <Icon
+      name={match?.[1] ?? "FileText"}
+      className={`size-4 shrink-0 ${match?.[2] ?? "text-muted-foreground"}`}
+    />
+  );
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function isImageAttachment(attachment: PromptDraftAttachment): boolean {
@@ -184,9 +216,13 @@ export function AttachmentPreview({
               {nonImageAttachments.map((attachment) => (
                 <span
                   key={attachment.path}
-                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-surface-recessed px-2 py-0.5 text-xs text-muted-foreground"
+                  className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-foreground/10 bg-surface-recessed pl-2 pr-1.5 text-xs text-foreground"
                 >
+                  <AttachmentFileIcon name={attachment.name} />
                   <span className="truncate">{attachment.name}</span>
+                  <span className="shrink-0 text-subtle-foreground">
+                    {formatFileSize(attachment.sizeBytes)}
+                  </span>
                   {onRemoveAttachment ? (
                     <span className="relative size-4 shrink-0">
                       <button

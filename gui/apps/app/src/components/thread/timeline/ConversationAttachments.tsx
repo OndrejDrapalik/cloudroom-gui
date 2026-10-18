@@ -7,6 +7,7 @@ import {
 } from "../../ui/image-lightbox.js";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { buildProjectAttachmentContentUrl } from "@/lib/file-content-urls";
+import { AttachmentFileIcon } from "@/components/promptbox/AttachmentPreview";
 import type {
   ThreadTimelineLocalFileLinkHandler,
   UserAttachmentImageSrcResolver,
@@ -164,13 +165,15 @@ export function ConversationAttachments({
         <div className={cn("flex flex-wrap gap-1.5", justifyClassName)}>
           {filePaths.map((path) => {
             const className = cn(
-              "inline-flex max-w-full items-center rounded-full border px-2 py-0.5 text-xs text-muted-foreground",
-              align === "end"
-                ? "border-surface-selected-border bg-surface-raised"
-                : "border-border bg-surface-recessed",
+              "inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-foreground/10 px-2 text-xs text-foreground",
+              align === "end" ? "bg-surface-raised" : "bg-surface-recessed",
             );
+            const name = fileNameFromPath(path);
             const label = (
-              <span className="truncate">{fileNameFromPath(path)}</span>
+              <>
+                <AttachmentFileIcon name={name} />
+                <span className="truncate">{name}</span>
+              </>
             );
             const attachmentHref = projectAttachmentHref({ path, projectId });
 

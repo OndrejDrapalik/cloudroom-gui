@@ -1313,10 +1313,16 @@ export interface GetLatestCompletedThreadContextClearSequenceArgs {
 
 export interface GetLatestThreadOutputEventRowArgs {
   threadId: string;
+  /** Only look inside this turn; omitted means the whole thread. */
+  turnId?: string;
 }
 
 export interface GetLatestThreadSystemErrorEventRowArgs {
   threadId: string;
+  /** Only this turn's errors. */
+  turnId?: string;
+  /** Also match provider/error, where provider turn failures land. */
+  includeProviderErrors?: boolean;
 }
 
 export interface GetLatestThreadSequenceArgs {
@@ -3259,7 +3265,7 @@ export function getLatestThreadOutputEventRow(
       .select(storedEventRowFields)
       .from(events)
       .where(
-        sql`${events.threadId} = ${args.threadId} AND (
+        sql`${events.threadId} = ${args.threadId}${args.turnId === undefined ? sql`` : sql` AND ${events.turnId} = ${args.turnId}`} AND (
         (
           ${events.type} = 'system/manager/user_message'
           AND COALESCE(json_extract(${events.data}, '$.text'), '') <> ''
@@ -3286,7 +3292,15 @@ export function getLatestThreadSystemErrorEventRow(
       .select(storedEventRowFields)
       .from(events)
       .where(
-        and(eq(events.threadId, args.threadId), eq(events.type, "system/error")),
+        and(
+          eq(events.threadId, args.threadId),
+          args.turnId === undefined
+            ? undefined
+            : eq(events.turnId, args.turnId),
+          args.includeProviderErrors === true
+            ? inArray(events.type, ["system/error", "provider/error"])
+            : eq(events.type, "system/error"),
+        ),
       )
       .orderBy(desc(events.sequence))
       .limit(1)

@@ -25,6 +25,7 @@ Before your first browser task, read the full guide: `browser-harness skill`. It
 - **Cloud threads:** Chromium on the sandbox's virtual screen, with no logins. `room-cli computer-use` sees the same window, so use it for native dialogs and browser menus.
   - The side-panel browser runs on the user's Mac. You can't use it or its logins.
   - If a site needs the user's login, say so. Ask before using their Mac's browser.
+  - With their OK, pipe the same script to `room-cli mac run --write --stdin 'browser-harness'`. Their browser may ask them to click Allow once; tell them.
 
 ## Rules
 

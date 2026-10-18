@@ -358,7 +358,7 @@ describe("plugin CLI commands (bb.cli.register + endpoints + skill + logs)", () 
       additionalSkillsRootPaths: [
         generatedSkillsRootPath(harness.config.dataDir),
       ],
-      dataDir: harness.config.dataDir,
+      userSkillsRootPath: harness.config.userSkillsRootPath,
       skillTreeRegistry: harness.deps.skillTreeRegistry,
     }).map((entry) => entry.runtimeSource);
     const skill = sources.find((source) => source.name === "plugin-commands");

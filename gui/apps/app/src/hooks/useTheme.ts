@@ -1,12 +1,11 @@
 import * as React from "react";
 import { getDefaultStore } from "jotai";
-import { atomWithStorage } from "jotai/utils";
 import {
   DARK_COLOR_SCHEME_QUERY,
   getMediaQuerySnapshot,
   subscribeMediaQuery,
 } from "@cloudroom/shared-ui/hooks/use-media-query";
-import { createLocalStorageEnumStorage } from "@/lib/browser-storage";
+import { createSyncedPreferenceAtom } from "@/lib/ui-preferences/synced-preference-atom";
 
 export const THEME_STORAGE_KEY = "bb.theme";
 
@@ -15,15 +14,9 @@ export type ThemePreference = Theme | "system";
 
 type ThemeListener = () => void;
 
-const themePreferenceStorage = createLocalStorageEnumStorage<ThemePreference>(
-  (value): value is ThemePreference =>
-    value === "light" || value === "dark" || value === "system",
-);
-const themePreferenceAtom = atomWithStorage<ThemePreference>(
+const themePreferenceAtom = createSyncedPreferenceAtom(
+  "appearance.theme",
   THEME_STORAGE_KEY,
-  "system",
-  themePreferenceStorage,
-  { getOnInit: true },
 );
 
 function getThemePreference(): ThemePreference {

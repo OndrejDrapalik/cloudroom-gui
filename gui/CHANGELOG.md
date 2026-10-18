@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 108
+
+Cloud subagents with your Mac closed (2026-10-17)
+
+### Changes
+
+- Cloud agents can message, stop, and archive their subagents even while your Mac is closed.
+- Subagents tell their parent why they failed, and long replies come back whole.
+- Adding a machine over SSH works again.
+- Approval cards for Mac commands show the script they run, with Deny as the default.
+- File attachments show a colored type icon and their size.
+- Theme and starting machine stay in sync across windows, and Settings search opens with /.
+- Claude skills accept arguments, pasted secrets lose stray spaces, and Cloud previews get more time to load.
+
 ## 107
 
 Loops and multiple Codex accounts (2026-10-16)

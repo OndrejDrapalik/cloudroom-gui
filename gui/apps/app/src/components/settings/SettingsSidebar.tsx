@@ -2,6 +2,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
@@ -68,6 +69,7 @@ export function SettingsSidebarContent({
   const closeOnMobile = useCloseMobileSidebar();
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(0);
+  const searchRef = useRef<HTMLInputElement>(null);
   const activeGroup = findSettingsNavGroup(
     navigation.activeSection,
     navigation.activePluginId,
@@ -88,6 +90,23 @@ export function SettingsSidebarContent({
       .getElementById(optionId(selectedIndex))
       ?.scrollIntoView?.({ block: "nearest" });
   }, [selectedIndex]);
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey)
+        return;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.matches("input, textarea, select"))
+      )
+        return;
+      event.preventDefault();
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
+  }, []);
   const rows = SETTINGS_NAV_GROUPS.flatMap((group) => {
     const links = getSettingsGroupLinks(group, navigation);
     return links.length > 0 ? [{ group, to: links[0]!.to }] : [];
@@ -130,12 +149,13 @@ export function SettingsSidebarContent({
       onResizeMouseDown={onResizeMouseDown}
       testIdPrefix={testIdPrefix}
     >
-      <div className="relative mt-1 mb-2">
+      <div className="relative mt-2 mb-3">
         <Icon
           name="Search"
-          className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-sidebar-foreground"
         />
         <Input
+          ref={searchRef}
           aria-label="Search settings"
           aria-activedescendant={
             selectedIndex >= 0 ? optionId(selectedIndex) : undefined
@@ -143,7 +163,7 @@ export function SettingsSidebarContent({
           aria-autocomplete="list"
           aria-controls={RESULTS_ID}
           aria-expanded={searching}
-          className="h-8 pl-8 text-sm"
+          className="h-9 border-sidebar-border bg-sidebar-accent pr-9 pl-9 text-sm"
           role="combobox"
           onChange={(event) => {
             setQuery(event.target.value);
@@ -166,9 +186,14 @@ export function SettingsSidebarContent({
             setQuery("");
             closeOnMobile();
           }}
-          placeholder="Search settings"
+          placeholder="Search settings…"
           value={query}
         />
+        {searching ? null : (
+          <kbd className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm border border-border-hairline px-1.5 py-0.5 font-sans text-xs leading-none text-subtle-foreground max-md:pointer-coarse:hidden">
+            /
+          </kbd>
+        )}
       </div>
       {searching ? (
         <>
