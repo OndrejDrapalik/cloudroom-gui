@@ -20,7 +20,7 @@ import type {
   ReviewResponse,
 } from "@/src/rpc-types";
 import { AutomationDetailView } from "./detail-view";
-import { useCloudAutomations } from "./cloud-view";
+import { replaceWebhookUrl, useCloudAutomations } from "./cloud-view";
 import {
   AutomationOverviewView,
   automationProjectLabel,
@@ -394,6 +394,8 @@ function useMutations() {
     resume: (route: DetailRoute) => call("automations_resume", route),
     run: (route: DetailRoute) => call("automations_run", route),
     delete: (route: DetailRoute) => call("automations_delete", route),
+    newWebhookUrl: (route: DetailRoute) =>
+      rpc.call("automations_new_webhook_url", route),
     update: (route: DetailRoute, agent: AgentExecutionUpdate) =>
       rpc.call("automations_update", { ...route, agent }),
   };
@@ -690,6 +692,11 @@ function DetailView({
       onCancelEdit={requiresPrompt ? onBack : () => setEditingRequested(false)}
       onUpdateAgent={updateAgent}
       onRunNow={() => runAction("run")}
+      onNewWebhookUrl={() =>
+        void replaceWebhookUrl(
+          async () => (await mutations.newWebhookUrl(route)).webhookUrl,
+        )
+      }
       onDelete={() => setDeleteOpen(true)}
       onOpenThread={openThread}
       footer={deleteDialog}

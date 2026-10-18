@@ -18,6 +18,7 @@
 - [Repo map](docs/repository-overview.md): apps, packages, and their roles.
 - [Architecture](docs/system-overview.md): how the system fits together.
 - [Cloudroom](apps/server/src/services/cloudroom/AGENTS.md): integration rules.
+- [Connect relay](apps/connect/AGENTS.md): the cloudroom.run Worker, its own database, and how to deploy it.
 - [Local QA](docs/debugging-and-qa.md): dev setup, logs, and verification.
 - [CLI guide](docs/cli-guide-and-skill.md): docs to update for CLI and config changes.
 - [Plugin API audit](docs/api_to_audit.md): experimental APIs and stabilization.

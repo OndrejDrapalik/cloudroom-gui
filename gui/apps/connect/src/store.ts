@@ -1,6 +1,7 @@
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
 const HANDLE_ALPHABET = "abcdefghjkmnpqrstvwxyz23456789";
 const SERVER_CACHE_MS = 15_000;
+const MACHINES_PER_MAC = 20;
 const SEEN_WRITE_INTERVAL_MS = 60_000;
 export const PHONE_CODE_TTL_MS = 10 * 60_000;
 export const SHARE_CODE_TTL_MS = 60_000;
@@ -14,6 +15,8 @@ export interface Server {
   credentialHash: string;
   lastSeenAt: number | null;
   name: string | null;
+  /** Set for a remote host: the Mac it runs threads for. */
+  ownerServerId: string | null;
 }
 
 export interface Session {
@@ -27,6 +30,7 @@ interface Cached<T> {
 }
 
 const servers = new Map<string, Cached<Server | null>>();
+const credentials = new Map<string, Cached<Server | null>>();
 const seenWrites = new Map<string, number>();
 
 function cached<T>(
@@ -84,6 +88,7 @@ interface ServerRow {
   credential_hash: string;
   last_seen_at: number | null;
   name?: string | null;
+  owner_server_id?: string | null;
 }
 
 function toServer(row: ServerRow | null): Server | null {
@@ -95,6 +100,7 @@ function toServer(row: ServerRow | null): Server | null {
         credentialHash: row.credential_hash,
         lastSeenAt: row.last_seen_at,
         name: row.name ?? null,
+        ownerServerId: row.owner_server_id ?? null,
       }
     : null;
 }
@@ -132,13 +138,84 @@ export async function serverByCredential(
   );
 }
 
-/** Every Mac on one Cloudroom account, oldest first. */
+/** A remote host's credential, cached briefly because its daemon sends it on every request. */
+export async function machineByCredential(
+  db: D1Database,
+  credential: string,
+): Promise<Server | null> {
+  if (!credential) return null;
+  const hash = await sha256Hex(credential);
+  return cached(credentials, hash, SERVER_CACHE_MS, async () =>
+    toServer(
+      await db
+        .prepare("SELECT * FROM server WHERE credential_hash = ? AND owner_server_id IS NOT NULL")
+        .bind(hash)
+        .first<ServerRow>(),
+    ),
+  );
+}
+
+export async function serverById(db: D1Database, id: string): Promise<Server | null> {
+  return toServer(
+    await db.prepare("SELECT * FROM server WHERE id = ?").bind(id).first<ServerRow>(),
+  );
+}
+
+/** Every Mac on one Cloudroom account, oldest first. Remote hosts are not Macs you switch to. */
 export async function accountServers(db: D1Database, userId: string): Promise<Server[]> {
   const { results } = await db
-    .prepare("SELECT * FROM server WHERE user_id = ? ORDER BY created_at")
+    .prepare("SELECT * FROM server WHERE user_id = ? AND owner_server_id IS NULL ORDER BY created_at")
     .bind(userId)
     .all<ServerRow>();
   return results.map((row) => toServer(row)!);
+}
+
+/** Adds a remote host for this Mac. Null when the Mac already has the most it may have. */
+export async function createMachine(
+  db: D1Database,
+  owner: Server,
+  name: string | null,
+): Promise<{ id: string; handle: string; credential: string } | null> {
+  const count = await db
+    .prepare("SELECT COUNT(*) AS n FROM server WHERE owner_server_id = ?")
+    .bind(owner.id)
+    .first<{ n: number }>();
+  if ((count?.n ?? 0) >= MACHINES_PER_MAC) return null;
+  const id = crypto.randomUUID();
+  const handle = randomString(HANDLE_ALPHABET, 10);
+  const credential = randomToken();
+  await db
+    .prepare(
+      "INSERT INTO server (id, user_id, install_id, handle, credential_hash, name, owner_server_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(id, owner.userId, `machine:${id}`, handle, await sha256Hex(credential), name, owner.id, Date.now())
+    .run();
+  return { id, handle, credential };
+}
+
+/** Removes a remote host and everything signed in to its shares. Returns its handle, or null if it was not this Mac's. */
+export async function deleteMachine(
+  db: D1Database,
+  ownerId: string,
+  machineId: string,
+): Promise<string | null> {
+  const row = await db
+    .prepare("DELETE FROM server WHERE id = ? AND owner_server_id = ? RETURNING handle, credential_hash")
+    .bind(machineId, ownerId)
+    .first<{ handle: string; credential_hash: string }>();
+  if (!row) return null;
+  servers.delete(row.handle);
+  credentials.delete(row.credential_hash);
+  return row.handle;
+}
+
+/** Which Mac a remote host belongs to, read fresh for each new connection. */
+export async function machineOwner(db: D1Database, machineId: string): Promise<string | null> {
+  const row = await db
+    .prepare("SELECT owner_server_id FROM server WHERE id = ?")
+    .bind(machineId)
+    .first<{ owner_server_id: string | null }>();
+  return row?.owner_server_id ?? null;
 }
 
 export async function setServerName(db: D1Database, serverId: string, name: string): Promise<void> {

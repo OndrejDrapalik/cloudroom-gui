@@ -6,7 +6,10 @@ import {
   createManualRun,
   decodeAutomationRow,
   deleteAutomation,
+  getAutomation,
   getAutomationForProject,
+  getAutomationRun,
+  listWebhookAttempts,
   isAutomationSpawnedThread,
   listAllAutomations,
   listAutomationRuns,
@@ -19,6 +22,7 @@ import {
   updateAutomation,
   closeAutomationRun,
   type AutomationRow,
+  type AutomationRunRow,
   type Db,
 } from "./data.js";
 import { createAutomationId } from "./ids.js";
@@ -70,6 +74,8 @@ type ServiceApi = Pick<BbPluginApi, "realtime" | "log"> & {
       Partial<Pick<BbPluginApi["sdk"]["projects"], "defaultExecutionOptions">>;
     providers: Pick<BbPluginApi["sdk"]["providers"], "list">;
     threads: Pick<BbPluginApi["sdk"]["threads"], "get" | "send" | "spawn">;
+    // Webhook loops' URLs live on the website (ADR 0262).
+    cloudroom?: Pick<BbPluginApi["sdk"]["cloudroom"], "automations">;
   };
 };
 
@@ -92,6 +98,18 @@ export interface AutomationService {
     automationId: string;
   }): AutomationResponse;
   run(input: RunAutomationInput): Promise<AutomationRunRpcResponse>;
+  /** Runs a batch of webhook events. True once a run has taken them (its thread started or its script ran), so the
+   *  batch can be acked; false while it must wait or try again. */
+  runWebhook(input: {
+    automationId: string;
+    batch: string;
+    events: string;
+  }): Promise<boolean>;
+  /** A webhook loop's new secret URL; the old one stops working. */
+  newWebhookUrl(input: {
+    projectId: string;
+    automationId: string;
+  }): Promise<AutomationResponse>;
   runs(input: ResolvedAutomationRunsInput): AutomationRunListResponse;
   review(): Promise<ReviewResponse>;
   markReviewed(input: { itemIds: string[]; reviewed: boolean }): { ok: true };
@@ -116,7 +134,7 @@ function validateTrigger(
       cron: trigger.cron,
       timezone: trigger.timezone,
     });
-  } else {
+  } else if (trigger.triggerType === "once") {
     validateOnceDefinition({ runAt: trigger.runAt, now });
   }
 }
@@ -124,7 +142,8 @@ function validateTrigger(
 function computeNextRunAt(
   trigger: ResolvedCreateAutomationInput["trigger"],
   now: number,
-): number {
+): number | null {
+  if (trigger.triggerType === "webhook") return null;
   if (trigger.triggerType === "once") {
     return trigger.runAt;
   }
@@ -489,6 +508,31 @@ async function requireProjectAvailable(
   }
 }
 
+/** A webhook run has taken its events once its agent's thread started or its script finished; a script's silent
+ *  tick counts. A run cut off before either, or that failed, has not. */
+function tookEvents(run: AutomationRunRow): boolean {
+  return (
+    run.status === "succeeded" ||
+    (run.status === "running" && run.threadId !== null) ||
+    (run.status === "skipped" && run.exitCode === 0)
+  );
+}
+
+/** A Local webhook loop's URL from the website, which keeps the events while this Mac is off (ADR 0262). */
+async function webhookUrl(
+  bb: ServiceApi,
+  automationId: string,
+): Promise<string> {
+  if (!bb.sdk.cloudroom)
+    throw new Error("Webhook loops need a Cloudroom account.");
+  const { url } = await bb.sdk.cloudroom.automations({
+    action: "hook",
+    local: automationId,
+  });
+  if (!url) throw new Error("The website returned no webhook URL.");
+  return url;
+}
+
 export function createAutomationService(args: {
   bb: ServiceApi;
   db: Db;
@@ -496,6 +540,59 @@ export function createAutomationService(args: {
   serverUrl: string;
 }): AutomationService {
   const { bb, db, pluginDataDir, serverUrl } = args;
+
+  /** Runs a claimed manual or webhook run: until an agent's thread starts, or a script ends. Webhook events reach
+   *  the agent or script as data. */
+  async function dispatchRun(
+    automation: AutomationRow,
+    run: AutomationRunRow,
+    execution: AutomationExecution,
+    events?: string,
+  ): Promise<void> {
+    publishAutomationChange(
+      bb,
+      automation.projectId,
+      "automation-runs-changed",
+    );
+    const closeFailedRun = (error: unknown): void => {
+      closeAutomationRun(db, {
+        runId: run.id,
+        status: "failed",
+        error: errorMessage(error),
+        now: Date.now(),
+      });
+    };
+    try {
+      if (execution.mode === "agent") {
+        await executeAgentRun(bb, db, {
+          automation,
+          run,
+          execution,
+          onFailure: closeFailedRun,
+          ...(events === undefined ? {} : { events }),
+        });
+      } else {
+        await executeScriptRun(bb, db, {
+          pluginDataDir,
+          automation,
+          run,
+          execution,
+          onFailure: closeFailedRun,
+          serverUrl,
+          ...(events === undefined ? {} : { events }),
+        });
+      }
+    } catch (error) {
+      closeFailedRun(error);
+      bb.log.error(
+        `Automation run ${run.id} failed unexpectedly: ${errorMessage(error)}`,
+      );
+      publishAutomationChange(bb, automation.projectId, [
+        "automations-changed",
+        "automation-runs-changed",
+      ]);
+    }
+  }
 
   return {
     async overview() {
@@ -564,6 +661,11 @@ export function createAutomationService(args: {
         );
       }
       const automationId = createAutomationId();
+      // A Local webhook loop lets anyone with its URL prompt an agent on this Mac, so one an agent makes starts
+      // paused until a person turns it on in the Loops panel (ADR 0260, 0262).
+      const webhook = payload.trigger.triggerType === "webhook";
+      const enabled =
+        payload.enabled && !(webhook && payload.origin === "agent");
       const stored = await resolveStoredExecution({
         pluginDataDir,
         automationId,
@@ -575,7 +677,7 @@ export function createAutomationService(args: {
           id: automationId,
           projectId: payload.projectId,
           name: payload.name,
-          enabled: payload.enabled,
+          enabled,
           trigger: payload.trigger,
           runMode: stored.execution.mode,
           execution: stored.execution,
@@ -583,7 +685,7 @@ export function createAutomationService(args: {
           createdByThreadId: payload.createdByThreadId ?? null,
           nextRunAt: computeInitialNextRunAt({
             trigger: payload.trigger,
-            enabled: payload.enabled,
+            enabled,
             now,
           }),
         });
@@ -596,8 +698,28 @@ export function createAutomationService(args: {
         });
         throw error;
       }
+      // Its URL is shown only now. A loop that can't get one isn't kept.
+      let url: string | undefined;
+      if (webhook) {
+        try {
+          url = await webhookUrl(bb, created.id);
+        } catch (error) {
+          deleteAutomation(db, {
+            projectId: payload.projectId,
+            automationId: created.id,
+          });
+          await deleteAutomationScriptDir({
+            dataDir: pluginDataDir,
+            automationId: created.id,
+          });
+          throw error;
+        }
+      }
       publishAutomationChange(bb, payload.projectId, "automations-changed");
-      return toStoredAutomationResponse(pluginDataDir, created);
+      return {
+        ...toStoredAutomationResponse(pluginDataDir, created),
+        ...(url ? { webhookUrl: url } : {}),
+      };
     },
 
     async update(input) {
@@ -623,6 +745,14 @@ export function createAutomationService(args: {
       const patch: Parameters<typeof updateAutomation>[1]["patch"] = {};
       if (input.name !== undefined) patch.name = input.name;
       if (input.trigger !== undefined) {
+        if (
+          (input.trigger.triggerType === "webhook") !==
+          (current.triggerType === "webhook")
+        ) {
+          throw new Error(
+            "A loop can't switch to or from a webhook trigger. Create a new loop instead.",
+          );
+        }
         validateTrigger(input.trigger, now);
         patch.trigger = input.trigger;
         patch.nextRunAt = current.enabled
@@ -718,6 +848,16 @@ export function createAutomationService(args: {
     async delete(input) {
       const automation = requireProjectAutomation(db, input);
       deleteAutomation(db, input);
+      // Its URL and waiting events go too; the website expires them in 7 days if this fails.
+      if (automation.triggerType === "webhook") {
+        await bb.sdk.cloudroom
+          ?.automations({ action: "unhook", local: automation.id })
+          .catch((error: unknown) =>
+            bb.log.warn(
+              `Webhook URL of deleted loop ${automation.id} not removed: ${errorMessage(error)}`,
+            ),
+          );
+      }
       await deleteAutomationScriptDir({
         dataDir: pluginDataDir,
         automationId: automation.id,
@@ -780,48 +920,50 @@ export function createAutomationService(args: {
         idempotencyKey: input.idempotencyKey ?? null,
         now,
       });
-      if (!deduped) {
-        publishAutomationChange(bb, input.projectId, "automation-runs-changed");
-        const closeFailedRun = (error: unknown): void => {
-          closeAutomationRun(db, {
-            runId: run.id,
-            status: "failed",
-            error: errorMessage(error),
-            now: Date.now(),
-          });
-        };
-        void (async () => {
-          try {
-            if (execution.mode === "agent") {
-              await executeAgentRun(bb, db, {
-                automation,
-                run,
-                execution,
-                onFailure: closeFailedRun,
-              });
-            } else {
-              await executeScriptRun(bb, db, {
-                pluginDataDir,
-                automation,
-                run,
-                execution,
-                onFailure: closeFailedRun,
-                serverUrl,
-              });
-            }
-          } catch (error) {
-            closeFailedRun(error);
-            bb.log.error(
-              `Manual automation run ${run.id} failed unexpectedly: ${errorMessage(error)}`,
-            );
-            publishAutomationChange(bb, input.projectId, [
-              "automations-changed",
-              "automation-runs-changed",
-            ]);
-          }
-        })();
-      }
+      if (!deduped) void dispatchRun(automation, run, execution);
       return { run: toAutomationRunResponse(run) };
+    },
+
+    async runWebhook(input) {
+      const automation = getAutomation(db, input.automationId);
+      if (automation?.triggerType !== "webhook" || !automation.enabled)
+        return false;
+      const { execution } = requireCanonicalAutomationForWrite(
+        pluginDataDir,
+        automation,
+        "run",
+      );
+      // Each attempt at a batch is a run named after it, so a batch the website hands out again never runs twice.
+      // One that took the events confirms it; a failed attempt is tried again with the next name. Three failures in a
+      // row pause the loop, and the batch waits on the website until it is resumed.
+      const key = `webhook:${input.batch}`;
+      const attempts = listWebhookAttempts(db, automation.id, key);
+      if (attempts.some(tookEvents)) return true;
+      if (attempts.some((attempt) => attempt.status === "running"))
+        return false;
+      const { run, deduped } = createManualRun(db, {
+        automationId: automation.id,
+        runMode: automation.runMode,
+        idempotencyKey:
+          attempts.length === 0 ? key : `${key}:${attempts.length + 1}`,
+        trigger: "webhook",
+        now: Date.now(),
+      });
+      // Another run is going: the batch waits for the next ask.
+      if (deduped) return false;
+      await dispatchRun(automation, run, execution, input.events);
+      const settled = getAutomationRun(db, run.id);
+      return settled !== null && tookEvents(settled);
+    },
+
+    async newWebhookUrl(input) {
+      const automation = requireProjectAutomation(db, input);
+      if (automation.triggerType !== "webhook")
+        throw new Error("Only webhook loops have a URL.");
+      return {
+        ...toStoredAutomationResponse(pluginDataDir, automation),
+        webhookUrl: await webhookUrl(bb, automation.id),
+      };
     },
 
     runs(input) {

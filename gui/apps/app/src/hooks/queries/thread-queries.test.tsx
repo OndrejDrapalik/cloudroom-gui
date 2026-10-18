@@ -734,7 +734,7 @@ describe("useThreadMentionCandidates", () => {
     expect(sdk.threads.list).not.toHaveBeenCalled();
   });
 
-  it("falls back to the capped list request without a sidebar cache", async () => {
+  it("falls back to the full open-thread list without a sidebar cache", async () => {
     const { wrapper } = createQueryClientTestHarness();
     const thread = makeThreadListEntry({ id: "thread-1" });
     vi.mocked(sdk.threads.list).mockResolvedValue([thread]);
@@ -749,7 +749,6 @@ describe("useThreadMentionCandidates", () => {
     });
     expect(vi.mocked(sdk.threads.list).mock.calls[0]?.[0]).toEqual({
       archived: false,
-      limit: 200,
       signal: expect.any(AbortSignal),
     });
   });

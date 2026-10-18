@@ -2,8 +2,6 @@ import { connectCredentialSchema } from "@cloudroom/connect-client";
 import type { ConnectCredential } from "@cloudroom/connect-client";
 import type { PluginKvStorage } from "@get-bb/plugin-sdk";
 
-export const CREDENTIAL_KV_KEY = "credential";
-
 export interface CredentialStore {
   read(): Promise<ConnectCredential | null>;
   write(value: ConnectCredential): Promise<void>;
@@ -12,7 +10,7 @@ export interface CredentialStore {
 
 export function createKvCredentialStore(
   kv: Pick<PluginKvStorage, "get" | "set" | "delete">,
-  key = CREDENTIAL_KV_KEY,
+  key: string,
 ): CredentialStore {
   return {
     async read() {

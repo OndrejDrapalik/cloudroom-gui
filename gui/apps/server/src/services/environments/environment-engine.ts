@@ -905,6 +905,37 @@ export function refreshProviderRetirement(
   deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
 }
 
+const TELEPORTED_WORKTREE_RETENTION_MS = 2 * 24 * 60 * 60_000;
+
+export function shortenWorktreeRetirement(
+  deps: {
+    db: DbConnection | DbTransaction;
+    hub: Pick<Deps["hub"], "notifyEnvironment">;
+  },
+  environmentId: string,
+): void {
+  const row = getEnvironment(deps.db, environmentId);
+  const retention =
+    WORKTREE_RETENTION_MS[getAppSettings(deps.db).worktreeRetention];
+  if (
+    row === null ||
+    row.environmentProviderId !== DEFAULT_ENVIRONMENT_PROVIDER_ID.gitWorktree ||
+    row.teardownStatus !== null ||
+    retention === null ||
+    environmentHasLiveThreads(deps.db, environmentId)
+  )
+    return;
+  const retireAt =
+    Date.now() + Math.min(retention, TELEPORTED_WORKTREE_RETENTION_MS);
+  if (row.retireAt !== null && row.retireAt <= retireAt) return;
+  deps.db
+    .update(environments)
+    .set({ retireAt })
+    .where(eq(environments.id, environmentId))
+    .run();
+  deps.hub.notifyEnvironment(environmentId, ["metadata-changed"]);
+}
+
 type EnvironmentProvisionCommand =
   HostDaemonCommandForType<"environment.attach">;
 type EnvironmentProvisionCommandResultReport =

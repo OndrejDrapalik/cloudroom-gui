@@ -12,7 +12,6 @@ import { MacAccessMenuItems, useMacAccessLevel } from "@/components/sidebar/MacA
 import { FixPrompt } from "@/components/ui/fix-prompt";
 import { cloudUnavailableFixPrompt, syncFixPrompt } from "@/lib/fix-prompts";
 import { SelfHostedCoreForm } from "./SelfHostedCoreForm";
-import { YourComputers } from "./YourComputers";
 
 function useRefreshCloudroom() {
   const queryClient = useQueryClient();
@@ -77,7 +76,6 @@ export function CloudroomAccountSettings() {
         {status.data && !account && !status.data.signingIn && <SelfHostedCoreForm connected={status.data.selfHosted === true} ready={status.data.ready} error={status.data.error} />}
       </div>
     </SettingsSection>}
-    <YourComputers />
     {signedIn && <BillingRow />}
     {signedIn && <MacAccessRow />}
   </>;

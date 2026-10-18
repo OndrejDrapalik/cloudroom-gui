@@ -102,20 +102,9 @@ import {
   type ComputersSync,
 } from "./computers.js";
 import {
-  createCredentialCookieSource,
-  createLocalServerCookieSource,
-  installConnectDesktopSession,
-  type ConnectDesktopSessionResult,
-} from "./connect-desktop-session.js";
-import {
   createConnectCredentialCache,
   type ConnectCredentialCache,
 } from "./connect-credential-cache.js";
-import { enrollDesktopMachine } from "./connect-machine-enrollment.js";
-import {
-  createConnectSessionRenewal,
-  type ConnectSessionRenewal,
-} from "./connect-session-renewal.js";
 import {
   createDesktopShutdownState,
   registerDesktopShutdownSignalHandlers,
@@ -371,10 +360,6 @@ let stoppingForQuit = false;
 let quitting = false;
 let serverTargetStore: ServerTargetStore | null = null;
 let computersSync: ComputersSync | null = null;
-let connectCredentialCache: ConnectCredentialCache | null = null;
-let cachedConnectCredential: ConnectCredential | null = null;
-let enrollingDesktopMachine: Promise<void> | null = null;
-let connectSessionRenewal: ConnectSessionRenewal | null = null;
 let serverTargetGeneration = 0;
 let computerList: ComputerList | null = null;
 let computersSkipReason: ComputersFailure | null = null;
@@ -1151,105 +1136,6 @@ async function ensureBuiltinRuntimeAttached(): Promise<boolean> {
   return runtime !== null;
 }
 
-async function authenticateConnectTarget(
-  remoteServerUrl: string,
-  isCurrent: () => boolean,
-): Promise<ConnectDesktopSessionResult> {
-  const cookieStore = session.defaultSession.cookies;
-  let cachedFailure: ConnectDesktopSessionResult | null = null;
-  if (cachedConnectCredential !== null) {
-    const cachedResult = await installConnectDesktopSession({
-      cookieStore,
-      mintCookie: createCredentialCookieSource({
-        credential: cachedConnectCredential,
-      }),
-      remoteServerUrl,
-    });
-    if (cachedResult.ok) {
-      return cachedResult;
-    }
-    if (cachedResult.code === "unauthorized") {
-      desktopLogger.info(
-        "[desktop] Cloudroom Connect refused the cached machine credential — dropping it",
-      );
-      await clearCachedConnectCredential();
-    } else if (cachedResult.code === "network") {
-      return cachedResult;
-    }
-    cachedFailure = cachedResult;
-  }
-
-  if (!isCurrent()) {
-    return (
-      cachedFailure ?? {
-        code: "network",
-        detail: "the app no longer targets this server",
-        ok: false,
-      }
-    );
-  }
-  const localRuntimeReady = await ensureBuiltinRuntimeAttached();
-  if (!localRuntimeReady || currentRuntime === null) {
-    return (
-      cachedFailure ?? {
-        code: "network",
-        detail:
-          "the local Cloudroom server is unavailable, and this app has no stored Cloudroom Connect credential",
-        ok: false,
-      }
-    );
-  }
-  const localResult = await installConnectDesktopSession({
-    cookieStore,
-    mintCookie: createLocalServerCookieSource({
-      localServerUrl: currentRuntime.serverUrl,
-    }),
-    remoteServerUrl,
-  });
-  if (localResult.ok) {
-    void ensureDesktopMachineEnrolled();
-  }
-  return localResult;
-}
-
-async function clearCachedConnectCredential(): Promise<void> {
-  cachedConnectCredential = null;
-  await connectCredentialCache?.clear();
-}
-
-function ensureDesktopMachineEnrolled(): void {
-  const cache = connectCredentialCache;
-  const localServerUrl = currentRuntime?.serverUrl;
-  if (
-    cache === null ||
-    cachedConnectCredential !== null ||
-    enrollingDesktopMachine !== null ||
-    localServerUrl === undefined
-  ) {
-    return;
-  }
-  if (!cache.canPersist()) {
-    desktopLogger.info(
-      "[desktop] no OS keychain available — keeping the local Cloudroom server for Cloudroom Connect sessions",
-    );
-    return;
-  }
-  enrollingDesktopMachine = (async () => {
-    const result = await enrollDesktopMachine({ localServerUrl });
-    if (!result.ok) {
-      desktopLogger.info(
-        `[desktop] could not enroll this app with Cloudroom Connect (${result.code}): ${result.detail}`,
-      );
-      return;
-    }
-    cachedConnectCredential = result.credential;
-    await cache.write(result.credential);
-    desktopLogger.info("[desktop] enrolled this app as a Cloudroom Connect machine");
-  })().finally(() => {
-    enrollingDesktopMachine = null;
-  });
-}
-
 async function retryStartup(): Promise<void> {
   if (startupRetryUrl === null || startupRetryPending) {
     return;
@@ -1278,28 +1164,33 @@ async function applyServerTarget(): Promise<void> {
     return;
   }
   const target = serverTargetStore.getTarget();
-  connectSessionRenewal?.stop();
   serverTargetGeneration += 1;
   const generation = serverTargetGeneration;
   const isCurrent = (): boolean => serverTargetGeneration === generation;
   setComputerFallback(null);
 
   // Your other Mac on cloudroom.run. If it doesn't answer, use this Mac until it's back.
-  if (target.kind === "connect" && isRelayUrl(target.server.url)) {
-    if (await openRelayComputer(target.server.handle, isCurrent)) {
+  if (target.kind === "connect") {
+    if (!isRelayUrl(target.server.url)) {
+      desktopLogger.info(
+        `[desktop] ${target.server.name} was a getbb.app address, which no longer works — opening ${BUILTIN_SERVER_NAME}`,
+      );
+      await serverTargetStore.setTarget("builtin");
+    } else if (await openRelayComputer(target.server.handle, isCurrent)) {
       refreshApplicationMenu();
       return;
+    } else {
+      if (!isCurrent()) {
+        return;
+      }
+      desktopLogger.info(
+        `[desktop] ${target.server.name} did not answer — opening ${BUILTIN_SERVER_NAME} instead`,
+      );
+      setComputerFallback({ handle: target.server.handle, name: target.server.name, back: false });
     }
-    if (!isCurrent()) {
-      return;
-    }
-    desktopLogger.info(
-      `[desktop] ${target.server.name} did not answer — opening ${BUILTIN_SERVER_NAME} instead`,
-    );
-    setComputerFallback({ handle: target.server.handle, name: target.server.name, back: false });
   }
 
-  if (target.kind === "builtin" || computerFallback !== null) {
+  if (target.kind !== "custom") {
     const attached = await ensureBuiltinRuntimeAttached();
     if (!isCurrent()) {
       return;
@@ -1323,40 +1214,6 @@ async function applyServerTarget(): Promise<void> {
         serverUrl: localServerUrl,
       }),
     );
-  } else if (target.kind === "connect") {
-    const result = await authenticateConnectTarget(
-      target.server.url,
-      isCurrent,
-    );
-    if (!isCurrent()) {
-      return;
-    }
-    if (!result.ok) {
-      desktopLogger.warn(
-        `[desktop] Connect authentication failed (${result.code}): ${result.detail}`,
-      );
-      await loadStartupError({
-        details:
-          "The desktop app could not establish a session for this Connect server. " +
-          `Try switching servers again. (${result.code}: ${result.detail})`,
-        logs: "",
-        retryable: true,
-        title: "Could not authenticate with Cloudroom Connect",
-      });
-      refreshApplicationMenu();
-      return;
-    }
-    connectSessionRenewal?.start({
-      expiresAt: result.expiresAt,
-      remoteServerUrl: target.server.url,
-    });
-    const loaded = await loadRemoteServerTarget(target.server.url, isCurrent);
-    if (!isCurrent()) {
-      return;
-    }
-    if (!loaded) {
-      connectSessionRenewal?.stop();
-    }
   } else {
     await loadRemoteServerTarget(target.url, isCurrent);
     if (!isCurrent()) {
@@ -1741,7 +1598,6 @@ async function finishQuit(): Promise<void> {
   desktopBrowserBrokerClient?.stop();
   desktopBrowserBroker?.dispose();
   stopSystemConfigSync();
-  connectSessionRenewal?.stop();
   desktopUpdateService?.stop();
   desktopAutoUpdateService?.stop();
   idleInstall?.stop();
@@ -2310,7 +2166,6 @@ async function runDesktopApp(): Promise<void> {
     void desktopUpdateService?.checkAfterActive();
     void desktopAutoUpdateService?.checkAfterActive();
     refreshRemoteSystemConfig?.();
-    connectSessionRenewal?.renewIfDue();
   });
   app.on("browser-window-created", (_event, browserWindow) => {
     if (desktopBrowserViewManager === null) {
@@ -2457,11 +2312,11 @@ async function runDesktopApp(): Promise<void> {
     storagePath: join(userDataPath, SERVER_TARGET_FILE_NAME),
   });
   await serverTargetStore.load();
-  connectCredentialCache = createConnectCredentialCache({
+  await createConnectCredentialCache({
     encryption: safeStorage,
+    fileName: "connect-credential.bin",
     userDataPath,
-  });
-  cachedConnectCredential = await connectCredentialCache.read();
+  }).clear();
   relayCredentialCache = createConnectCredentialCache({
     encryption: safeStorage,
     fileName: RELAY_CREDENTIAL_FILE_NAME,
@@ -2504,21 +2359,6 @@ async function runDesktopApp(): Promise<void> {
       sendDesktopInfoChanged();
     },
   });
-  connectSessionRenewal = createConnectSessionRenewal({
-    async authenticate(remoteServerUrl, isCurrent) {
-      const result = await authenticateConnectTarget(
-        remoteServerUrl,
-        isCurrent,
-      );
-      return result.ok
-        ? result
-        : { detail: `${result.code}: ${result.detail}`, ok: false };
-    },
-    log: (message) => {
-      desktopLogger.warn(`[desktop] ${message}`);
-    },
-  });
-
   const desktopUpdateSupport = resolveDesktopUpdateSupport({
     canReplaceAppImage,
     env: process.env,

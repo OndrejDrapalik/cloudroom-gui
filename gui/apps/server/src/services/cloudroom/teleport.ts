@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute, join } from "node:path";
-import { and, asc, desc, eq, inArray, like } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like } from "drizzle-orm";
 import {
   cloudroomThreads,
   cloudroomCommands,
@@ -19,6 +19,7 @@ import type { PromptInput } from "@cloudroom/domain";
 import { ApiError } from "../../errors.js";
 import { runLiveHostCommand } from "../hosts/live-command.js";
 import { workspaceContextFromPath } from "../environments/workspace-command-target.js";
+import { shortenWorktreeRetirement } from "../environments/environment-engine.js";
 import {
   getLastExecutionOptions,
   getLastProviderThreadId,
@@ -194,50 +195,10 @@ class Teleport {
       );
     }
   }
-  private async start(
+  private validate(
     threadId: string,
     choice?: { model: string; reasoning: string },
-  ): Promise<TeleportProgress> {
-    const existing = teleportProgress(this.deps.db, threadId);
-    if (existing && existing.phase !== "cancelled") {
-      if (existing.owner !== threadId)
-        throw new ApiError(
-          409,
-          "teleport_in_progress",
-          "This child belongs to its parent's Teleport transfer.",
-        );
-      if (existing.phase === "checking")
-        throw new ApiError(
-          409,
-          "teleport_in_progress",
-          "Teleport is already starting.",
-        );
-      if (existing.phase === "complete") return existing;
-      if (existing.phase === "error") {
-        const saved = this.load(existing.id);
-        await this.preflight(
-          threadId,
-          getThread(this.deps.db, threadId)!.providerId,
-          saved,
-          true,
-        );
-        if (existing.cloudStarted)
-          this.save({ ...saved, retryRequestId: randomUUID() });
-        saveTeleportProgress(this.deps.db, threadId, {
-          ...existing,
-          phase: existing.cloudStarted ? "running" : "stopping",
-          error: undefined,
-        });
-      }
-      this.launch(threadId, existing.id);
-      return teleportProgress(this.deps.db, threadId)!;
-    }
-    if (this.active.has(threadId))
-      throw new ApiError(
-        409,
-        "teleport_cancelling",
-        "Cancellation is finishing. Retry Teleport once it settles.",
-      );
+  ) {
     const thread = getThread(this.deps.db, threadId);
     const environment = thread?.environmentId
       ? getEnvironment(this.deps.db, thread.environmentId)
@@ -326,6 +287,88 @@ class Teleport {
         "teleport_in_progress",
         "This thread already has cloud ownership metadata.",
       );
+    return {
+      thread,
+      environment: { ...environment, path: environment.path },
+      all,
+      sessions,
+      last,
+      execution,
+      queuedRows,
+    };
+  }
+  async check(
+    threadId: string,
+    choice?: { model: string; reasoning: string },
+  ): Promise<{ model: string; reasoning: string; warnings: string[] }> {
+    const existing = teleportProgress(this.deps.db, threadId);
+    if (existing && !["cancelled", "complete"].includes(existing.phase))
+      throw new ApiError(409, "teleport_in_progress", "Teleport is already running for this thread.");
+    const { thread, environment, all, execution } = this.validate(threadId, choice);
+    try {
+      await this.preflight(thread.id, thread.providerId, execution);
+    } catch (error) {
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(409, "teleport_check_failed", `Teleport would not start. ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const sharing = this.deps.db
+      .select({ id: threads.id })
+      .from(threads)
+      .where(and(eq(threads.environmentId, environment.id), isNull(threads.archivedAt), isNull(threads.deletedAt)))
+      .all()
+      .filter((other) => !all.some((source) => source.id === other.id)).length;
+    const warnings = [
+      ...(all.length > 1 ? [`${all.length - 1} child thread(s) move to Cloud with it.`] : []),
+      ...(sharing ? [`${sharing} other open thread(s) use this folder; they stay on this Mac.`] : []),
+    ];
+    return { model: execution.model, reasoning: execution.reasoning, warnings };
+  }
+  private async start(
+    threadId: string,
+    choice?: { model: string; reasoning: string },
+  ): Promise<TeleportProgress> {
+    const existing = teleportProgress(this.deps.db, threadId);
+    if (existing && existing.phase !== "cancelled") {
+      if (existing.owner !== threadId)
+        throw new ApiError(
+          409,
+          "teleport_in_progress",
+          "This child belongs to its parent's Teleport transfer.",
+        );
+      if (existing.phase === "checking")
+        throw new ApiError(
+          409,
+          "teleport_in_progress",
+          "Teleport is already starting.",
+        );
+      if (existing.phase === "complete") return existing;
+      if (existing.phase === "error") {
+        const saved = this.load(existing.id);
+        await this.preflight(
+          threadId,
+          getThread(this.deps.db, threadId)!.providerId,
+          saved,
+          true,
+        );
+        if (existing.cloudStarted)
+          this.save({ ...saved, retryRequestId: randomUUID() });
+        saveTeleportProgress(this.deps.db, threadId, {
+          ...existing,
+          phase: existing.cloudStarted ? "running" : "stopping",
+          error: undefined,
+        });
+      }
+      this.launch(threadId, existing.id);
+      return teleportProgress(this.deps.db, threadId)!;
+    }
+    if (this.active.has(threadId))
+      throw new ApiError(
+        409,
+        "teleport_cancelling",
+        "Cancellation is finishing. Retry Teleport once it settles.",
+      );
+    const { thread, environment, all, sessions, last, execution, queuedRows } =
+      this.validate(threadId, choice);
     const id = randomUUID();
     saveTeleportProgress(this.deps.db, threadId, {
       id,
@@ -1032,6 +1075,7 @@ class Teleport {
       error: undefined,
     });
     if (complete) {
+      shortenWorktreeRetirement(this.deps, state.environmentId);
       for (const source of state.sessions.slice(1))
         saveTeleportProgress(this.deps.db, source.threadId, {
           id,

@@ -14,7 +14,7 @@ export const CONNECT_UNPAIRED: ServerAccessStatus = {
     {
       id: "connect",
       displayName: "bb connect",
-      description: "Use a private getbb.app address.",
+      description: "Use this Mac's private cloudroom.run address.",
       pluginId: "connect",
       availability: {
         status: "setup-required",

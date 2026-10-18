@@ -154,7 +154,6 @@ function writeServerInstallTools(
     `#!/bin/sh
 printf '%s\n' "$*" >>"${curlLog}"
 case "$*" in
-  *redeem-machine*) printf '%s' '{"credential":"bbcm_durable","machineId":"machine-1"}' ;;
   *)
     output=
     headers=
@@ -916,47 +915,6 @@ fs.writeFileSync(path.join(process.env.ROOM_DATA_DIR, "config.json"), JSON.strin
         });
       }
     }
-  });
-
-  it("redeems and persists a connect machine code before joining through the tunnel", () => {
-    const fixture = createFixture();
-    const invocationPath = join(fixture.dataDir, "invocation");
-    writeServerInstallTools(fixture, 200);
-    writeEnrollingBbApp(fixture, invocationPath);
-    const result = runScript(
-      [
-        "--join-code",
-        "join-secret",
-        "--host-id",
-        "host-test",
-        "--server",
-        "https://sawyer.getbb.app",
-        "--machine-code",
-        "MACH-INE1",
-      ],
-      fixture,
-      { BB_INSTALL_SKIP_SERVICE: "1" },
-    );
-
-    expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(join(fixture.dataDir, "curl.log"), "utf8")).toContain(
-      "--connect-timeout 10 --max-time 30 -X POST",
-    );
-    expect(readFileSync(invocationPath, "utf8")).not.toContain("bbcm_durable");
-    expect(readFileSync(invocationPath, "utf8")).not.toContain(
-      "--machine-credential",
-    );
-    expect(
-      JSON.parse(readFileSync(join(fixture.dataDir, "config.json"), "utf8")),
-    ).toMatchObject({
-      connectMachineId: "machine-1",
-      machineCredential: "bbcm_durable",
-      serverUrl: "https://sawyer.getbb.app",
-    });
-    const daemonPid = Number(
-      readFileSync(join(fixture.dataDir, "install-daemon.pid"), "utf8"),
-    );
-    process.kill(daemonPid, "SIGTERM");
   });
 
   it("reports periodic progress while a host daemon is still joining", () => {

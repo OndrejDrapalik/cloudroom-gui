@@ -8,6 +8,9 @@ import {
   claudeSecret,
   claudeUsage,
   localClaudeEmail,
+  profileAccount,
+  signOut,
+  tokenOrganization,
 } from "./src/claude.js";
 import {
   codexListSchema,
@@ -25,6 +28,7 @@ import {
   type Provider,
   type UsageWindow,
 } from "./src/contract.js";
+import { prepareProfile } from "./src/profile.js";
 import { SignInAgainError, type Secret, type SignedIn } from "./src/tokens.js";
 
 const USAGE_EVERY_MS = 5 * 60_000;
@@ -37,6 +41,9 @@ const storedSchema = z.object({
   email: z.string().nullable(),
   plan: z.string().nullable(),
   accountKey: z.string().nullable(),
+  // The account's own Claude folder with its full login (claude.ai connectors); older accounts have only the one-year token.
+  profile: z.string().nullish(),
+  org: z.string().nullish(),
   createdAt: z.number(),
 });
 type Stored = z.infer<typeof storedSchema>;
@@ -47,6 +54,15 @@ const secretSchema = z.object({
   idToken: z.string().optional(),
   issuedAt: z.number().optional(),
 });
+type Adding = {
+  login: string;
+  profile: string;
+  replace: string | null;
+  mac: boolean;
+  account?: Awaited<ReturnType<typeof profileAccount>>;
+  url?: string;
+  busy?: boolean;
+};
 type Usage = {
   windows: UsageWindow[];
   error: string | null;
@@ -75,6 +91,12 @@ export default async function plugin(bb: BbPluginApi) {
   );
   await fs.mkdir(secretsDir, { recursive: true, mode: 0o700 });
   const secretPath = (id: string) => path.join(secretsDir, `${id}.json`);
+  const profilesDir = path.join(path.dirname(secretsDir), "profiles");
+  const profilePath = (profile: string) => path.join(profilesDir, profile);
+  const dropProfile = async (profile: string) => {
+    await signOut(profilePath(profile));
+    await fs.rm(profilePath(profile), { recursive: true, force: true });
+  };
   let accounts = z
     .array(storedSchema)
     .catch([])
@@ -101,7 +123,16 @@ export default async function plugin(bb: BbPluginApi) {
   const usage = new Map<string, Usage>();
   const threadAccount = new Map<string, string>();
   const claudeLogin = new ClaudeLogin();
-  const macSignIns = new Set<string>();
+  const adding = new Map<string, Adding>();
+  void fs.readdir(profilesDir).then(
+    (found) =>
+      Promise.all(
+        found
+          .filter((profile) => !accounts.some((entry) => entry.profile === profile))
+          .map(dropProfile),
+      ),
+    () => {},
+  );
   let codexInUse = LOCAL;
   let codexAccounts = 0;
 
@@ -202,7 +233,11 @@ export default async function plugin(bb: BbPluginApi) {
   bb.onDispose(() => clearInterval(timer));
   void refreshAll();
 
-  const add = async (signedIn: SignedIn, use = false) => {
+  const add = async (
+    signedIn: SignedIn,
+    use: boolean,
+    login: Pick<Stored, "profile" | "org">,
+  ) => {
     if (ids().length >= MAX_ACCOUNTS)
       throw new Error(
         `You can connect up to ${MAX_ACCOUNTS} accounts per provider.`,
@@ -213,6 +248,7 @@ export default async function plugin(bb: BbPluginApi) {
       email: signedIn.email,
       plan: signedIn.plan,
       accountKey: signedIn.accountKey,
+      ...login,
       createdAt: Date.now(),
     };
     await writeSecret(account.id, { ...signedIn.secret, issuedAt: Date.now() });
@@ -244,6 +280,7 @@ export default async function plugin(bb: BbPluginApi) {
             : window,
         ),
         needsSignIn: false,
+        limitedLogin: account !== undefined && !account.profile,
       };
     });
     // Keep the Mac's Claude login visible until it is added again (ADR 0197).
@@ -259,6 +296,7 @@ export default async function plugin(bb: BbPluginApi) {
         error: null,
         windows: [],
         needsSignIn: true,
+        limitedLogin: false,
       });
     return rows;
   };
@@ -284,11 +322,13 @@ export default async function plugin(bb: BbPluginApi) {
         error: null,
         windows: [],
         needsSignIn: false,
+        limitedLogin: false,
       },
       ...list.accounts.map((account) => ({
         ...account,
         limitedUntil: limitedUntil("codex", account.id),
         needsSignIn: false,
+        limitedLogin: false,
       })),
     ];
   };
@@ -308,6 +348,55 @@ export default async function plugin(bb: BbPluginApi) {
     if (id === LOCAL)
       throw new Error("This machine's own login can't be changed here.");
     return id;
+  };
+  // Both sign-ins must be the same account: the full login runs Local threads, the one-year token runs Cloud.
+  const save = async (state: Adding, token: string) => {
+    const account = state.account!;
+    if (!account.orgId || account.orgId !== (await tokenOrganization(token)))
+      throw new Error(
+        "Both sign-ins must use the same Claude account. Start again.",
+      );
+    const secret = { ...claudeSecret(token), issuedAt: Date.now() };
+    const existing =
+      accounts.find((entry) => entry.id === state.replace) ??
+      accounts.find(
+        (entry) =>
+          entry.org === account.orgId && entry.email === account.email,
+      );
+    if (!existing)
+      return add(
+        { email: account.email, plan: account.plan, accountKey: null, secret },
+        state.mac,
+        { profile: state.profile, org: account.orgId },
+      );
+    // A revoked token can't name its account; anything else unconfirmed keeps the saved login.
+    const before =
+      existing.org ??
+      (await readSecret(existing)
+        .then((saved) => tokenOrganization(saved.accessToken))
+        .catch((error: unknown) =>
+          error instanceof SignInAgainError ? account.orgId : null,
+        ));
+    if (!before)
+      throw new Error("Couldn't confirm this account. Try again.");
+    if (
+      before !== account.orgId ||
+      (existing.org && existing.email !== account.email)
+    )
+      throw new Error(
+        "That is a different Claude account. Sign in with this account's email.",
+      );
+    const old = existing.profile;
+    await writeSecret(existing.id, secret);
+    existing.email = account.email;
+    existing.plan = account.plan ?? existing.plan;
+    existing.profile = state.profile;
+    existing.org = account.orgId;
+    if (old) void dropProfile(old);
+    if (existing.id === inCloud) inCloud = null;
+    if (state.mac) move(existing.id, 0);
+    await changed();
+    void refreshUsage(existing, true);
   };
 
   bb.rpc.register(
@@ -345,6 +434,8 @@ export default async function plugin(bb: BbPluginApi) {
           await kv.set("limits:v1", limits);
           return null;
         }
+        const removed = accounts.find((account) => account.id === id);
+        if (removed?.profile) void dropProfile(removed.profile);
         accounts = accounts.filter((account) => account.id !== id);
         order["claude-code"] = order["claude-code"].filter(
           (entry) => entry !== id,
@@ -366,31 +457,61 @@ export default async function plugin(bb: BbPluginApi) {
         return null;
       },
       "claude.start": async (input) => {
-        const started = await claudeLogin.start();
-        if (input?.mac) macSignIns.add(started.sessionId);
-        return started;
+        const replace = input?.id ? stored(input.id) : null;
+        const profile = randomUUID();
+        try {
+          await prepareProfile(profilePath(profile));
+          const started = await claudeLogin.start(profilePath(profile));
+          adding.set(started.sessionId, {
+            login: started.sessionId,
+            profile,
+            replace,
+            mac: input?.mac ?? false,
+          });
+          return started;
+        } catch (error) {
+          void dropProfile(profile);
+          throw error;
+        }
       },
       "claude.poll": async ({ sessionId }) => {
+        const state = adding.get(sessionId);
+        if (!state)
+          return {
+            status: "error" as const,
+            message: "This sign-in expired. Start again.",
+            authorizeUrl: null,
+          };
+        const pending = {
+          status: "pending" as const,
+          message: null,
+          authorizeUrl: state.url ?? null,
+        };
+        if (state.busy) return pending;
+        state.busy = true;
         try {
-          const token = claudeLogin.poll(sessionId);
-          if (!token) return { status: "pending" as const, message: null };
-          // Signing in the Mac's login again labels it with the Mac's email and selects it.
-          const mac = macSignIns.delete(sessionId);
-          await add(
-            {
-              email: mac ? await localClaudeEmail() : null,
-              plan: null,
-              accountKey: null,
-              secret: claudeSecret(token),
-            },
-            mac,
-          );
-          return { status: "complete" as const, message: null };
+          const result = claudeLogin.poll(state.login);
+          if (!result) return pending;
+          if (!state.account) {
+            state.account = await profileAccount(profilePath(state.profile));
+            const next = await claudeLogin.start();
+            state.login = next.sessionId;
+            state.url = next.authorizeUrl;
+            return { ...pending, authorizeUrl: next.authorizeUrl };
+          }
+          adding.delete(sessionId);
+          await save(state, result);
+          return { status: "complete" as const, message: null, authorizeUrl: null };
         } catch (error) {
+          adding.delete(sessionId);
+          void dropProfile(state.profile);
           return {
             status: "error" as const,
             message: error instanceof Error ? error.message : String(error),
+            authorizeUrl: null,
           };
+        } finally {
+          state.busy = false;
         }
       },
       "codex.start": async () =>
@@ -420,9 +541,24 @@ export default async function plugin(bb: BbPluginApi) {
       threadAccount.set(context.threadId, id);
       const account = accounts.find((entry) => entry.id === id);
       if (!account) return [];
+      const reason = `Cloudroom account ${account.email ?? account.id}`;
+      if (account.profile) {
+        const profile = profilePath(account.profile);
+        await prepareProfile(profile).catch((error: unknown) =>
+          bb.log.warn(
+            `Claude account folder not refreshed: ${error instanceof Error ? error.message : String(error)}`,
+          ),
+        );
+        return [
+          { name: "CLAUDE_CONFIG_DIR", value: profile, reason },
+          { name: "CLAUDE_CODE_OAUTH_TOKEN", value: "", reason },
+          { name: "CLAUDE_CODE_SUBSCRIPTION_TYPE", value: "", reason },
+          { name: "CLAUDE_SECURESTORAGE_CONFIG_DIR", value: "", reason },
+          { name: "ANTHROPIC_API_KEY", value: "", reason },
+        ];
+      }
       const secret = await readSecret(account).catch(() => null);
       if (!secret) return [];
-      const reason = `Cloudroom account ${account.email ?? account.id}`;
       return [
         { name: "CLAUDE_CODE_OAUTH_TOKEN", value: secret.accessToken, reason },
         { name: "ANTHROPIC_API_KEY", value: "", reason },

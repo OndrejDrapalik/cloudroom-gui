@@ -81,7 +81,16 @@ function formatCronCadence(cron: string): string {
     .trim();
 }
 
+/** A cloud webhook loop has neither a cron nor a one-time run (ADR 0262). */
+export function isCloudWebhook(automation: {
+  cron: string | null;
+  run_at: string | null;
+}): boolean {
+  return automation.cron === null && automation.run_at === null;
+}
+
 export function formatAutomationTrigger(trigger: AutomationTrigger): string {
+  if (trigger.triggerType === "webhook") return "On webhook";
   if (trigger.triggerType === "once") {
     return "One time";
   }
@@ -153,7 +162,9 @@ export function formatScheduleStatusLabel({
     return "Paused";
   }
   if (nextRunAt === null) {
-    return "Not scheduled";
+    return trigger?.triggerType === "webhook"
+      ? "Waits for a webhook"
+      : "Not scheduled";
   }
   return `Next ${formatScheduleRunTime(nextRunAt)}`;
 }

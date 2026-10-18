@@ -107,7 +107,11 @@ export const automationRunStatusSchema = z.enum([
   "skipped",
 ]);
 export type AutomationRunStatus = z.infer<typeof automationRunStatusSchema>;
-export const automationRunTriggerSchema = z.enum(["schedule", "manual"]);
+export const automationRunTriggerSchema = z.enum([
+  "schedule",
+  "manual",
+  "webhook",
+]);
 export type AutomationRunTrigger = z.infer<typeof automationRunTriggerSchema>;
 export const automationScriptInterpreterSchema = z.enum([
   "bash",
@@ -132,9 +136,14 @@ const automationOnceTriggerSchema = z
     runAt: z.number().int().positive(),
   })
   .strict();
+// Runs when its secret URL gets a POST (ADR 0262). The website holds the URL and the events; this Mac pulls them.
+const automationWebhookTriggerSchema = z
+  .object({ triggerType: z.literal("webhook") })
+  .strict();
 export const automationTriggerSchema = z.discriminatedUnion("triggerType", [
   automationScheduleTriggerSchema,
   automationOnceTriggerSchema,
+  automationWebhookTriggerSchema,
 ]);
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;
 
@@ -269,6 +278,8 @@ export const automationResponseSchema = z
     lastError: z.string().nullable(),
     createdAt: z.number(),
     updatedAt: z.number(),
+    /** A webhook loop's secret URL, only when it is created or replaced: the website keeps just its hash. */
+    webhookUrl: z.string().url().optional(),
   })
   .strict();
 export type AutomationResponse = z.infer<typeof automationResponseSchema>;

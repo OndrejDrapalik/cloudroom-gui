@@ -23,13 +23,45 @@ export type CloudAutomation = {
 export type CloudAutomationActions = {
   onOpen: (a: CloudAutomation) => void;
   onRun: (a: CloudAutomation) => void;
+  onNewUrl: (a: CloudAutomation) => void;
   onDelete: (a: CloudAutomation) => void;
   onEnabledChange: (a: CloudAutomation, enabled: boolean) => void;
 };
 type Request =
   | { action: "list" }
   | { action: "update"; id: string; enabled: boolean }
-  | { action: "run" | "delete"; id: string };
+  | { action: "run" | "delete" | "hook"; id: string };
+
+/** Asks, then replaces a webhook loop's secret URL and copies the new one. The website keeps only its hash, so this
+ *  is the only time it shows. */
+export async function replaceWebhookUrl(
+  replace: () => Promise<string | undefined>,
+): Promise<void> {
+  if (
+    !window.confirm(
+      "Make a new webhook URL? The old one stops working at once.",
+    )
+  )
+    return;
+  try {
+    const url = await replace();
+    if (!url) throw new Error("No URL came back.");
+    await navigator.clipboard.writeText(url).then(
+      () =>
+        toast.success("New webhook URL copied", {
+          description:
+            "Paste it into the sending service. It isn't shown again.",
+        }),
+      () =>
+        toast.success("New webhook URL", {
+          description: url,
+          duration: Infinity,
+        }),
+    );
+  } catch (error: unknown) {
+    toast.error(error instanceof Error ? error.message : String(error));
+  }
+}
 
 export function useCloudAutomations(): {
   rows: CloudAutomation[];
@@ -73,6 +105,12 @@ export function useCloudAutomations(): {
       onOpen: (a) => navigate.toThread(a.thread_id),
       onRun: (a) =>
         void act({ action: "run", id: a.id }, "Runs within a minute"),
+      onNewUrl: (a) =>
+        void replaceWebhookUrl(
+          async () =>
+            ((await call({ action: "hook", id: a.id })) as { url?: string })
+              .url,
+        ),
       onDelete: (a) => {
         if (window.confirm(`Delete "${a.name}"?`))
           void act({ action: "delete", id: a.id }, "Deleted");

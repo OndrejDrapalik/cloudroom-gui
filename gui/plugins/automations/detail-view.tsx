@@ -76,6 +76,8 @@ interface AutomationDetailViewProps {
   onCancelEdit: () => void;
   onUpdateAgent: (update: AgentExecutionUpdate) => Promise<void>;
   onRunNow: () => void;
+  /** A webhook loop's new secret URL (ADR 0262). */
+  onNewWebhookUrl?: () => void;
   onDelete: () => void;
   onOpenThread: (threadId: string) => void;
   footer?: ReactNode;
@@ -726,6 +728,7 @@ export function AutomationDetailView({
   onCancelEdit,
   onUpdateAgent,
   onRunNow,
+  onNewWebhookUrl,
   onDelete,
   onOpenThread,
   footer,
@@ -815,6 +818,15 @@ export function AutomationDetailView({
                 : undefined,
               onSelect: onRunNow,
             },
+            ...(automation.trigger.triggerType === "webhook" && onNewWebhookUrl
+              ? [
+                  {
+                    label: "New webhook URL",
+                    icon: "Link" as const,
+                    onSelect: onNewWebhookUrl,
+                  },
+                ]
+              : []),
             { kind: "separator" },
             {
               label: "Delete",

@@ -21,11 +21,12 @@ export const WORKTREE_RETENTION_MS = {
   "1h": 60 * MINUTE_MS,
   "1d": DAY_MS,
   "7d": 7 * DAY_MS,
+  "21d": 21 * DAY_MS,
   "30d": 30 * DAY_MS,
   never: null,
 } as const satisfies Record<string, number | null>;
 export type WorktreeRetention = keyof typeof WORKTREE_RETENTION_MS;
-export const DEFAULT_WORKTREE_RETENTION: WorktreeRetention = "30d";
+export const DEFAULT_WORKTREE_RETENTION: WorktreeRetention = "21d";
 const worktreeRetentionSchema = z.enum(
   Object.keys(WORKTREE_RETENTION_MS) as [WorktreeRetention, ...WorktreeRetention[]],
 );

@@ -77,12 +77,14 @@ function AccountTile({
   onUse,
   onRename,
   onRemove,
+  onSignInAgain,
 }: {
   account: AccountView;
   index: number;
   onUse: () => void;
   onRename: (name: string) => void;
   onRemove: () => void;
+  onSignInAgain?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const local = account.id === LOCAL;
@@ -153,6 +155,11 @@ function AccountTile({
               <DropdownMenuItem onSelect={() => setEditing(true)}>
                 <Icon name="Edit" /> Rename
               </DropdownMenuItem>
+              {onSignInAgain ? (
+                <DropdownMenuItem onSelect={onSignInAgain}>
+                  <Icon name="RotateCcw" /> Sign in again
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onSelect={onRemove}
                 className="text-destructive-text focus:text-destructive-text"
@@ -170,6 +177,15 @@ function AccountTile({
         <div className="truncate text-xs text-warning-text" title={status}>
           {status}
         </div>
+      ) : null}
+      {account.limitedLogin && onSignInAgain ? (
+        <button
+          type="button"
+          onClick={onSignInAgain}
+          className="truncate text-left text-xs text-primary-text hover:underline"
+        >
+          Sign in again for claude.ai connectors
+        </button>
       ) : null}
       <div className="mt-auto space-y-1.5 pt-4">
         {account.windows.slice(0, 2).map((window) => (
@@ -207,11 +223,13 @@ function AccountTile({
 function SignInRow({
   provider,
   mac,
+  id,
   rpc,
   close,
 }: {
   provider: Provider;
   mac: boolean;
+  id: string | null;
   rpc: Rpc;
   close: () => void;
 }) {
@@ -220,6 +238,7 @@ function SignInRow({
     sessionId: string;
     url: string;
     userCode: string | null;
+    second: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -228,15 +247,19 @@ function SignInRow({
     let cancelled = false;
     const start =
       provider === "claude-code"
-        ? rpc.call("claude.start", mac ? { mac } : null).then((started) => ({
-            sessionId: started.sessionId,
-            url: started.authorizeUrl,
-            userCode: null,
-          }))
+        ? rpc
+            .call("claude.start", mac || id ? { mac, id: id ?? undefined } : null)
+            .then((started) => ({
+              sessionId: started.sessionId,
+              url: started.authorizeUrl,
+              userCode: null,
+              second: false,
+            }))
         : rpc.call("codex.start", null).then((started) => ({
             sessionId: started.sessionId,
             url: started.verificationUri,
             userCode: started.userCode,
+            second: false,
           }));
     start.then(
       (next) => {
@@ -249,7 +272,7 @@ function SignInRow({
     return () => {
       cancelled = true;
     };
-  }, [provider, mac, rpc]);
+  }, [provider, mac, id, rpc]);
 
   useEffect(() => {
     if (step === null || error !== null) return;
@@ -261,6 +284,10 @@ function SignInRow({
         .then((result) => {
           if (result.status === "complete") close();
           if (result.status === "error") setError(result.message);
+          if (result.authorizeUrl && result.authorizeUrl !== step.url) {
+            setStep({ ...step, url: result.authorizeUrl, second: true });
+            navigate.openUrl(result.authorizeUrl);
+          }
         });
     }, 3_000);
     return () => window.clearInterval(timer);
@@ -303,6 +330,12 @@ function SignInRow({
                   {step.userCode}
                 </span>
               </>
+            ) : provider === "claude-code" ? (
+              step.second ? (
+                "Approve once more, for Cloud · 2 of 2"
+              ) : (
+                "Waiting for sign-in · 1 of 2"
+              )
             ) : (
               "Waiting for sign-in"
             )}
@@ -333,7 +366,10 @@ function SignInRow({
 function AccountsSection({ provider }: { provider: Provider }) {
   const rpc = useRpc<typeof accountsRpcContract>();
   const [accounts, setAccounts] = useState<AccountView[] | null>(null);
-  const [adding, setAdding] = useState<"new" | "mac" | null>(null);
+  const [adding, setAdding] = useState<{
+    mac: boolean;
+    id: string | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     rpc
@@ -362,7 +398,7 @@ function AccountsSection({ provider }: { provider: Provider }) {
           variant="ghost"
           size="sm"
           disabled={adding !== null || count >= MAX_ACCOUNTS}
-          onClick={() => setAdding("new")}
+          onClick={() => setAdding({ mac: false, id: null })}
         >
           <Icon name="Plus" /> Add
         </Button>
@@ -378,7 +414,7 @@ function AccountsSection({ provider }: { provider: Provider }) {
                 <TerminalTile
                   key={account.id}
                   account={account}
-                  onSignIn={() => setAdding("mac")}
+                  onSignIn={() => setAdding({ mac: true, id: null })}
                 />
               ) : (
                 <AccountTile
@@ -404,6 +440,11 @@ function AccountsSection({ provider }: { provider: Provider }) {
                       rpc.call("accounts.remove", { provider, id: account.id }),
                     )
                   }
+                  onSignInAgain={
+                    provider === "claude-code" && adding === null
+                      ? () => setAdding({ mac: false, id: account.id })
+                      : undefined
+                  }
                 />
               ),
             )}
@@ -413,7 +454,8 @@ function AccountsSection({ provider }: { provider: Provider }) {
         <div className="rounded-lg border border-dashed border-border px-3.5">
           <SignInRow
             provider={provider}
-            mac={adding === "mac"}
+            mac={adding.mac}
+            id={adding.id}
             rpc={rpc}
             close={() => {
               setAdding(null);

@@ -97,7 +97,6 @@ interface QueryOptions {
 const THREAD_LIST_STALE_TIME_MS = 10_000;
 const THREAD_SEARCH_STALE_TIME_MS = 10_000;
 const THREAD_DETAIL_STALE_TIME_MS = 5_000;
-const THREAD_MENTION_CANDIDATE_LIMIT = 200;
 const THREAD_SEARCH_DEBOUNCE_MS = 150;
 export const THREAD_SEARCH_LIMIT_PER_GROUP = 20;
 const THREAD_SEARCH_MIN_NON_WHITESPACE_CHARS = 2;
@@ -194,14 +193,8 @@ interface UseThreadMentionCandidatesArgs {
 
 type ThreadListItem = ThreadListResponse[number];
 
-interface GetThreadMentionCandidatePlaceholderArgs {
-  limit: number;
-  queryClient: QueryClient;
-}
-
 const THREAD_MENTION_CANDIDATE_FILTERS = {
   archived: false,
-  limit: THREAD_MENTION_CANDIDATE_LIMIT,
 } satisfies UseThreadsFilters;
 
 function buildThreadSubsetListFilters({
@@ -271,31 +264,21 @@ function addThreadMentionCandidate(
   }
 }
 
-function buildThreadMentionCandidates(
-  threads: readonly ThreadListItem[],
-  { limit }: { limit: number },
-): ThreadListResponse {
-  const candidatesById = new Map<string, ThreadListItem>();
-  for (const thread of threads) {
-    addThreadMentionCandidate(candidatesById, thread);
-  }
-  return Array.from(candidatesById.values()).slice(0, limit);
-}
-
 const EMPTY_THREAD_LIST: ThreadListResponse = [];
 
 function selectThreadMentionCandidates(
   threads: ThreadListEntry[],
 ): ThreadListResponse {
-  return buildThreadMentionCandidates(threads, {
-    limit: THREAD_MENTION_CANDIDATE_LIMIT,
-  });
+  const candidatesById = new Map<string, ThreadListItem>();
+  for (const thread of threads) {
+    addThreadMentionCandidate(candidatesById, thread);
+  }
+  return Array.from(candidatesById.values());
 }
 
-function getThreadMentionCandidatePlaceholder({
-  limit,
-  queryClient,
-}: GetThreadMentionCandidatePlaceholderArgs): ThreadListResponse | undefined {
+function getThreadMentionCandidatePlaceholder(
+  queryClient: QueryClient,
+): ThreadListResponse | undefined {
   const candidatesById = new Map<string, ThreadListItem>();
   for (const thread of getCachedSidebarNavigationThreads(queryClient)) {
     addThreadMentionCandidate(candidatesById, thread);
@@ -308,7 +291,7 @@ function getThreadMentionCandidatePlaceholder({
     }
   }
 
-  const candidates = Array.from(candidatesById.values()).slice(0, limit);
+  const candidates = Array.from(candidatesById.values());
   return candidates.length > 0 ? candidates : undefined;
 }
 
@@ -552,11 +535,7 @@ export function useThreadMentionCandidates({
       sdk.threads.list({ ...THREAD_MENTION_CANDIDATE_FILTERS, signal }),
     enabled: shouldFetch,
     placeholderData: (previousData) =>
-      previousData ??
-      getThreadMentionCandidatePlaceholder({
-        limit: THREAD_MENTION_CANDIDATE_LIMIT,
-        queryClient,
-      }),
+      previousData ?? getThreadMentionCandidatePlaceholder(queryClient),
     staleTime: THREAD_LIST_STALE_TIME_MS,
   });
   const derivedCandidates = enabled ? sidebarCandidates : undefined;

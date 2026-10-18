@@ -14,7 +14,7 @@ import { assertUsableHostId } from "../hosts/primary-host.js";
 import { parseStoredEvent } from "../threads/thread-data.js";
 import { createClientTurnRequestId } from "../threads/thread-events.js";
 import { waitForStart } from "./bb-import.js";
-import { createMoreThread, isMoreHarness, moreSessions, moreTurns, type MoreHarness } from "./session-import-more.js";
+import { createMoreThread, isMoreHarness, moreSessions, moreTurns, t3Claims, type MoreHarness } from "./session-import-more.js";
 
 export type SessionHarness = "claude-code" | "codex" | MoreHarness;
 export interface NativeSession { harness: SessionHarness; id: string; title: string; cwd: string; updatedAt: number }
@@ -23,7 +23,7 @@ export interface SessionImportResult {
   skipped: { harness: SessionHarness; id: string; title: string; reason: string }[];
 }
 
-export interface Found extends NativeSession { path: string }
+export interface Found extends NativeSession { path: string; native?: { harness: string; id?: string; path?: string; moved?: boolean } }
 export interface Turn { at: number; text: string; model: string; replies: { at: number; text: string }[] }
 export type Line = Record<string, any>;
 
@@ -33,7 +33,7 @@ const OWN_CODEX_ORIGINATORS = /^(bb|cloudroom|cloud_agents|codex_exec|teleport)/
 let running: Promise<SessionImportResult> | null = null;
 
 export async function listNativeSessions(deps: AppDeps): Promise<NativeSession[]> {
-  return (await findSessions(deps)).map(({ path: _path, ...session }) => session);
+  return (await findSessions(deps)).map(({ path: _path, native: _native, ...session }) => session);
 }
 
 export function importNativeSessions(deps: AppDeps, hostId: string, wanted: { harness: SessionHarness; id: string }[]): Promise<SessionImportResult> {
@@ -60,6 +60,7 @@ async function run(deps: AppDeps, hostId: string, wanted: { harness: SessionHarn
       if (!turns.length) { skip("No messages to bring over."); continue; }
       const thread = await createImportedThread(deps, hostId, session, turns);
       map[key] = thread.id;
+      if (session.native?.id) map[`${session.native.harness}:${session.native.id}`] = thread.id;
       await writeFile(mapPath, JSON.stringify(map, null, 2), { mode: 0o600 });
       if (await waitForStart(deps, thread.id) === "error") skip(`Copied to ${thread.id}, but it could not be set up. Open it to retry.`);
       else result.imported.push({ harness, id, threadId: thread.id, title: session.title });
@@ -74,20 +75,37 @@ async function findSessions(deps: AppDeps): Promise<Found[]> {
   const mapPath = join(deps.config.dataDir, "session-imports.json");
   const map: Record<string, string> = existsSync(mapPath) ? JSON.parse(await readFile(mapPath, "utf8")) : {};
   const known = new Set(deps.db.selectDistinct({ id: events.providerThreadId }).from(events).where(isNotNull(events.providerThreadId)).all().map((row) => row.id));
-  const imported = (session: Found) => {
-    const threadId = map[`${session.harness}:${session.id}`];
+  const imported = ({ harness, id }: { harness: string; id?: string }) => {
+    const threadId = map[`${harness}:${id}`];
     return threadId !== undefined && getThread(deps.db, threadId)?.deletedAt === null;
   };
-  const sessions = [...await claudeSessions(), ...await codexSessions(), ...await moreSessions(deps)];
-  return sessions.filter((session) => !known.has(session.id) && !imported(session)).sort((a, b) => b.updatedAt - a.updatedAt);
+  const [claude, codex] = await Promise.all([claudeFiles(), codexFiles()]);
+  const files = new Map<string, string>([
+    ...claude.map((path) => [`claude-code:${basename(path, ".jsonl")}`, path] as const),
+    ...codex.map((path) => [`codex:${basename(path, ".jsonl").slice(-36)}`, path] as const),
+  ]);
+  const sessions = [...await claudeSessions(claude), ...await codexSessions(codex), ...await moreSessions(deps)];
+  const claimed = t3Claims(deps);
+  for (const { native } of sessions) if (native?.id) native.path = files.get(`${native.harness}:${native.id}`);
+  return sessions
+    .filter((session) => !claimed.has(`${session.harness}:${session.id}`) && !known.has(session.id) && !imported(session) && !(session.native?.id && imported(session.native)))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-async function claudeSessions(): Promise<Found[]> {
+async function claudeFiles(): Promise<string[]> {
   const root = join(claudeHome(), "projects");
   const folders = await readdir(root).catch(() => [] as string[]);
-  const files = (await Promise.all(folders.map(async (folder) =>
+  return (await Promise.all(folders.map(async (folder) =>
     (await readdir(join(root, folder)).catch(() => [] as string[])).filter((file) => file.endsWith(".jsonl") && !file.startsWith("agent-")).map((file) => join(root, folder, file)))))
     .flat();
+}
+
+async function codexFiles(): Promise<string[]> {
+  const root = join(codexHome(), "sessions");
+  return (await readdir(root, { recursive: true }).catch(() => [] as string[])).filter((file) => /rollout-.*\.jsonl$/.test(file)).map((file) => join(root, file));
+}
+
+async function claudeSessions(files: string[]): Promise<Found[]> {
   return compact(await mapLimit(files, async (path): Promise<Found | null> => {
     const lines = await headLines(path, 256 * 1024);
     if (lines.some((line) => line.isSidechain === true || /^sdk/.test(line.entrypoint ?? ""))) return null;
@@ -101,16 +119,13 @@ async function claudeSessions(): Promise<Found[]> {
   }));
 }
 
-async function codexSessions(): Promise<Found[]> {
-  const root = join(codexHome(), "sessions");
-  const files = (await readdir(root, { recursive: true }).catch(() => [] as string[])).filter((file) => /rollout-.*\.jsonl$/.test(file));
+async function codexSessions(files: string[]): Promise<Found[]> {
   const names = new Map<string, string>();
   for (const line of (await readFile(join(codexHome(), "session_index.jsonl"), "utf8").catch(() => "")).split("\n")) {
     const entry = parseLine(line);
     if (typeof entry?.id === "string" && typeof entry.thread_name === "string") names.set(entry.id, entry.thread_name);
   }
-  return compact(await mapLimit(files, async (file): Promise<Found | null> => {
-    const path = join(root, file);
+  return compact(await mapLimit(files, async (path): Promise<Found | null> => {
     const lines = await headLines(path, 512 * 1024);
     const meta = lines[0]?.type === "session_meta" ? lines[0].payload : null;
     if (!meta?.id || !meta.cwd || !["cli", "vscode"].includes(meta.source) || OWN_CODEX_ORIGINATORS.test(meta.originator ?? "")) return null;

@@ -8,8 +8,8 @@ import {
   type HeaderPair,
 } from "@cloudroom/tunnel-contract";
 import { relayedResponse } from "./response-encoding.js";
-import { TUNNEL_SESSION_HEADER, TUNNEL_TARGET_HEADER } from "./protocol-headers.js";
-import { markServerSeen, sessionByToken } from "./store.js";
+import { TUNNEL_MACHINE_HEADER, TUNNEL_SESSION_HEADER, TUNNEL_TARGET_HEADER } from "./protocol-headers.js";
+import { machineOwner, markServerSeen, sessionByToken } from "./store.js";
 
 export interface Env {
   TUNNEL_DO: DurableObjectNamespace;
@@ -38,6 +38,7 @@ const HOP_HEADERS = new Set([
   "sec-websocket-extensions",
   TUNNEL_TARGET_HEADER,
   TUNNEL_SESSION_HEADER,
+  TUNNEL_MACHINE_HEADER,
 ]);
 
 function forwardableHeaders(headers: Headers): HeaderPair[] {
@@ -148,15 +149,20 @@ export class TunnelDO {
 
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       return this.state.blockConcurrencyWhile(async () => {
+        const machineId = request.headers.get(TUNNEL_MACHINE_HEADER);
         const token = request.headers.get(TUNNEL_SESSION_HEADER);
-        if (!token || !/^[a-f0-9]{64}$/.test(token)) {
+        if (!machineId && (!token || !/^[a-f0-9]{64}$/.test(token))) {
           return new Response("Sign in required\n", { status: 401 });
         }
         try {
-          const [session, serverId] = await Promise.all([
-            sessionByToken(this.env.DB, token),
-            this.state.storage.get<string>("serverId"),
-          ]);
+          const serverId = await this.state.storage.get<string>("serverId");
+          if (machineId) {
+            if (target !== undefined || (await machineOwner(this.env.DB, machineId)) !== serverId) {
+              return new Response("Machine not authorized\n", { status: 403 });
+            }
+            return this.openVisitorWebSocket(request, url, tunnel, target);
+          }
+          const session = await sessionByToken(this.env.DB, token!);
           if (
             !session ||
             session.serverId !== serverId ||

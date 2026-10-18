@@ -21,7 +21,9 @@ import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import type { AutomationService } from "./service.js";
 
 const cloudAutomationInputSchema = z
-  .object({ action: z.enum(["list", "create", "update", "run", "delete"]) })
+  .object({
+    action: z.enum(["list", "create", "update", "run", "delete", "hook"]),
+  })
   .passthrough();
 
 export const automationRpcContract = defineRpcContract({
@@ -60,6 +62,11 @@ export const automationRpcContract = defineRpcContract({
   automations_run: {
     input: runAutomationInputSchema,
     output: automationRunRpcResponseSchema,
+  },
+  // A webhook loop's new secret URL (ADR 0262), shown once.
+  automations_new_webhook_url: {
+    input: projectAutomationInputSchema,
+    output: automationResponseSchema,
   },
   automations_runs: {
     input: automationRunsInputSchema,
@@ -160,6 +167,11 @@ export function createRpcHandlers(service: AutomationService, sdk?: Sdk) {
     },
     automations_run(input: z.output<typeof runAutomationInputSchema>) {
       return service.run(input);
+    },
+    automations_new_webhook_url(
+      input: z.output<typeof projectAutomationInputSchema>,
+    ) {
+      return service.newWebhookUrl(input);
     },
     automations_runs(input: z.output<typeof automationRunsInputSchema>) {
       return service.runs(input);

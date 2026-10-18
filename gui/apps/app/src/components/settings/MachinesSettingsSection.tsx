@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Host, PermissionMode } from "@cloudroom/domain";
 import type { SystemMachineProvider } from "@cloudroom/server-contract";
@@ -30,6 +30,7 @@ import {
   machineStatusTone,
 } from "@/components/machines/machine-status";
 import { MachineRenameDialog } from "@/components/settings/MachineRenameDialog";
+import { OpenMacButton, YourMacRow, useYourMacs } from "@/components/settings/YourComputers";
 import { MachineIcon } from "@/components/machines/MachineLabel";
 import {
   SETTINGS_CARD_CLASS,
@@ -93,6 +94,7 @@ interface MachineRowProps {
   lifecycleActionPending: boolean;
   retryUpdatePending: boolean;
   machineProvider: SystemMachineProvider | null;
+  accessory?: ReactNode;
 }
 
 export function MachineRowContent({
@@ -112,6 +114,7 @@ export function MachineRowContent({
   lifecycleActionPending,
   retryUpdatePending,
   machineProvider,
+  accessory,
 }: MachineRowProps) {
   const navigate = useNavigate();
   const detailPath = getSettingsMachineRoutePath(host.id);
@@ -195,6 +198,7 @@ export function MachineRowContent({
           </div>
         </div>
       </Link>
+      {accessory}
       <div className="opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 has-[[data-state=open]]:opacity-100 pointer-coarse:opacity-100">
         <TooltipProvider delayDuration={250}>
           <DropdownMenu>
@@ -277,6 +281,14 @@ export function MachinesSettingsSection() {
   const [removeTarget, setRemoveTarget] = useState<Host | null>(null);
 
   const hosts = hostsQuery.data;
+  const macs = useYourMacs().data ?? [];
+  const hostIds = new Set(hosts?.map((host) => host.id));
+  const macByHostId = new Map(
+    macs.flatMap((mac) => (mac.hostId === null ? [] : [[mac.hostId, mac] as const])),
+  );
+  const otherMacs = macs.filter(
+    (mac) => !mac.self && (mac.hostId === null || !hostIds.has(mac.hostId)),
+  );
   const serverPrimaryHostId = systemConfig.data?.primaryHostId ?? null;
   const projects = sidebarNavigationQuery.data?.projects;
   const projectCountByHostId = useMemo(() => {
@@ -298,7 +310,8 @@ export function MachinesSettingsSection() {
     showAllMachines && sandboxHosts !== undefined
       ? [...(persistentHosts ?? []), ...sandboxHosts]
       : (persistentHosts ?? []);
-  const showMachineIdentityBadges = (persistentHosts?.length ?? 0) > 1;
+  const showMachineIdentityBadges =
+    (persistentHosts?.length ?? 0) > 1 || otherMacs.length > 0;
   const machineProviderById = useMemo(
     () =>
       new Map(
@@ -372,7 +385,15 @@ export function MachinesSettingsSection() {
               ? null
               : (machineProviderById.get(host.machineProviderId) ?? null)
           }
+          accessory={
+            macByHostId.has(host.id) ? (
+              <OpenMacButton mac={macByHostId.get(host.id)!} />
+            ) : null
+          }
         />
+      ))}
+      {otherMacs.map((mac) => (
+        <YourMacRow key={mac.handle} mac={mac} />
       ))}
       <button
         type="button"
@@ -395,6 +416,11 @@ export function MachinesSettingsSection() {
       <SettingsSection
         plain
         title="Machines"
+        description={
+          macs.length > 1
+            ? "Every Mac signed in to your Cloudroom account shows up here by itself."
+            : undefined
+        }
         bodyClassName="flex flex-col gap-3"
       >
         {hosts === undefined ? (

@@ -390,6 +390,21 @@ export function Overview() {
         </PreviewStage>
       </StoryRow>
       <StoryRow
+        label="cloud file, no preview"
+        hint="Cloud thread file the panel can't show, like a ZIP; Save to Downloads copies it to this computer"
+      >
+        <PreviewStage>
+          <FilePreview
+            path="/code/app/dist/store-assets.zip"
+            onDownload={noopOpenInEditor}
+            state={{
+              kind: "error",
+              message: "Preview not available for application/zip.",
+            }}
+          />
+        </PreviewStage>
+      </StoryRow>
+      <StoryRow
         label="loading"
         hint="Skeleton lines while file contents are being fetched"
       >

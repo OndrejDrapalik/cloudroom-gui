@@ -25,6 +25,8 @@ export const accountViewSchema = z.object({
   windows: z.array(usageWindowSchema),
   // The Mac's own Claude login, shown but not selectable until it is signed in again.
   needsSignIn: z.boolean(),
+  // A Claude account added before full logins: it runs on its one-year token, without claude.ai connectors.
+  limitedLogin: z.boolean(),
 });
 export type AccountView = z.infer<typeof accountViewSchema>;
 
@@ -34,6 +36,8 @@ const poll = z.object({ sessionId: z.string() });
 const polled = z.object({
   status: z.enum(["pending", "complete", "error"]),
   message: z.string().nullable(),
+  // Claude's second sign-in, for the one-year token Cloud uses.
+  authorizeUrl: z.string().nullish(),
 });
 
 export const accountsRpcContract = defineRpcContract({
@@ -52,7 +56,9 @@ export const accountsRpcContract = defineRpcContract({
     output: ok,
   },
   "claude.start": {
-    input: z.object({ mac: z.boolean() }).nullable(),
+    input: z
+      .object({ mac: z.boolean().optional(), id: z.string().optional() })
+      .nullable(),
     output: z.object({ sessionId: z.string(), authorizeUrl: z.string() }),
   },
   "codex.start": {

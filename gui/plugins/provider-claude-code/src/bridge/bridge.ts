@@ -1542,11 +1542,17 @@ function buildSessionEnv(
     CLAUDE_CODE_ENTRYPOINT: "cli",
   };
   delete sessionEnv.CLAUDE_AGENT_SDK_CLIENT_APP;
-  if (sessionEnv.ANTHROPIC_API_KEY === "") delete sessionEnv.ANTHROPIC_API_KEY;
+  for (const key of ACCOUNT_ENV_KEYS) if (sessionEnv[key] === "") delete sessionEnv[key];
   return sessionEnv;
 }
 
-const ACCOUNT_ENV_KEYS = new Set(["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]);
+const ACCOUNT_ENV_KEYS = new Set([
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "CLAUDE_CODE_SUBSCRIPTION_TYPE",
+  "CLAUDE_CONFIG_DIR",
+  "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+]);
 const settingsSignatures = new WeakMap<ThreadAttachment, string>();
 function settingsSignature(env: Readonly<Record<string, string>>): string {
   return environmentSignature(

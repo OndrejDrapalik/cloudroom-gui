@@ -72,11 +72,13 @@ export function validateOnceDefinition(args: {
 export function computeInitialNextRunAt(args: {
   trigger:
     | { triggerType: "schedule"; cron: string; timezone: string }
-    | { triggerType: "once"; runAt: number };
+    | { triggerType: "once"; runAt: number }
+    | { triggerType: "webhook" };
   enabled: boolean;
   now: number;
 }): number | null {
-  if (!args.enabled) return null;
+  // A webhook loop has no next run: its Mac starts a run when the website hands it events (src/hooks.ts).
+  if (!args.enabled || args.trigger.triggerType === "webhook") return null;
   if (args.trigger.triggerType === "once") {
     validateOnceDefinition({ runAt: args.trigger.runAt, now: args.now });
     return args.trigger.runAt;

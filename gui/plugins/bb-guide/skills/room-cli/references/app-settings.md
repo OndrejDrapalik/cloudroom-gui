@@ -119,8 +119,8 @@ This blocks common catastrophic shell commands; it is not a sandbox.
 
 ## Worktree cleanup
 
-- `worktreeRetention` defaults to `30d`. Options: `5m`, `1h`, `1d`, `7d`,
-  `30d`, `never`. Set it with
+- `worktreeRetention` defaults to `21d`. Options: `5m`, `1h`, `1d`, `7d`,
+  `21d`, `30d`, `never`. Set it with
   `room-cli settings general worktreeRetention <option>`.
 - cloudroom deletes a worktree folder that long after its last thread is
   archived or deleted. The branch stays; uncommitted changes are lost.

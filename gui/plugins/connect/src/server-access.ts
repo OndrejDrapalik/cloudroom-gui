@@ -1,19 +1,29 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { lookupMachineCode } from "./machine-code.js";
-import type { ConnectTunnel } from "./tunnel.js";
-import { fetchMachineCode } from "./machine-code.js";
-import { revokeMachine } from "./revoke-machine.js";
-import { redeemMachineCode } from "./redeem.js";
 
-const grantSchema = z.object({
-  connectMachineId: z.string().min(1),
-  grant: z.object({
-    id: z.string().min(1),
-    serverUrl: z.string().url(),
-    headers: z.record(z.string(), z.string()),
+const MACHINE_CREDENTIAL_HEADER = "x-bb-connect-machine";
+
+const storedSchema = z.object({
+  result: z.object({
+    connectMachineId: z.string().min(1),
+    grant: z.object({
+      id: z.string().min(1),
+      serverUrl: z.string().url(),
+      headers: z.record(z.string(), z.string()),
+    }),
   }),
 });
+
+const machineSchema = z.object({
+  machineId: z.string().min(1),
+  credential: z.string().min(1),
+  serverUrl: z.string().url(),
+});
+
+export interface RelayAccess {
+  call(path: string, body: unknown): Promise<unknown>;
+  status(): { paired: boolean; url: string | null };
+}
 
 export function createServerAccessRecheck(
   bb: BbPluginApi,
@@ -27,32 +37,11 @@ export function createServerAccessRecheck(
   };
 }
 
-function acquisitionFailure(message: string) {
-  return { status: "failed" as const, message };
-}
-
 function grantKey(hostId: string): string {
   return `server-access-grant:${hostId}`;
 }
 
-export async function registerServerAccess(
-  bb: BbPluginApi,
-  tunnel: {
-    getCredential: ConnectTunnel["getCredential"];
-    status(): { paired: boolean; url: string | null };
-  },
-) {
-  const intentSchema = z.object({
-    key: z.string(),
-    hostId: z.string(),
-    code: z.string(),
-    expiresAt: z.number().finite(),
-    serverUrl: z.string().url(),
-  });
-  const stateSchema = z.union([
-    z.object({ result: grantSchema }),
-    z.object({ intent: intentSchema }),
-  ]);
+export async function registerServerAccess(bb: BbPluginApi, relay: RelayAccess) {
   let queue = Promise.resolve();
   function serialized<T>(action: () => Promise<T>): Promise<T> {
     const result = queue.then(action);
@@ -63,37 +52,15 @@ export async function registerServerAccess(
     return result;
   }
   async function load(hostId: string) {
-    const raw = await bb.storage.kv.get<unknown>(grantKey(hostId));
-    return raw === undefined ? undefined : stateSchema.parse(raw);
-  }
-  async function reconcile(
-    intent: z.infer<typeof intentSchema>,
-    signal: AbortSignal,
-  ) {
-    const credential = tunnel.getCredential();
-    if (!credential)
-      throw new Error(
-        "Pair this Cloudroom instance with Cloudroom Connect to revoke machine access",
-      );
-    try {
-      const status = await lookupMachineCode(credential, intent.code, signal);
-      if (status.consumed && !status.machineId)
-        throw new Error("Device identity unavailable");
-      if (status.machineId) await revokeMachine(credential, status.machineId);
-      return status.consumed;
-    } catch {
-      signal.throwIfAborted();
-      const message =
-        "Cloud device may need dashboard revocation: interrupted machine access acquisition; retry after Cloud lookup is available";
-      return acquisitionFailure(message);
-    }
+    const parsed = storedSchema.safeParse(await bb.storage.kv.get<unknown>(grantKey(hostId)));
+    return parsed.success ? parsed.data.result : undefined;
   }
   bb.experimental_serverAccess.register({
     id: "connect",
     displayName: "Cloudroom Connect",
-    description: "Use a private getbb.app address.",
+    description: "Use this Mac's private cloudroom.run address.",
     availability: () => {
-      const status = tunnel.status();
+      const status = relay.status();
       return status.paired
         ? {
             status: "available",
@@ -101,55 +68,22 @@ export async function registerServerAccess(
           }
         : {
             status: "setup-required",
-            message: "Pair this Cloudroom instance with Cloudroom Connect",
+            message: "Sign in to Cloudroom so other machines can reach this Mac",
           };
     },
-    acquire({ key, hostId, signal }) {
+    acquire({ hostId, signal }) {
       return serialized(async () => {
         signal.throwIfAborted();
         const existing = await load(hostId);
-        if (existing && "result" in existing) return existing.result.grant;
-        const credential = tunnel.getCredential();
-        if (!credential)
-          throw new Error("Pair this Cloudroom instance with Cloudroom Connect");
-        let intent = existing?.intent;
-        if (intent) {
-          const reconciliation = await reconcile(intent, signal);
-          if (typeof reconciliation !== "boolean") return reconciliation;
-          if (reconciliation || intent.expiresAt <= Date.now())
-            intent = undefined;
-        }
-        if (!intent) {
-          const code = await fetchMachineCode(credential, signal);
-          intent = {
-            key,
-            hostId,
-            code: code.code,
-            serverUrl: code.serverUrl,
-            expiresAt: code.expiresAt,
-          };
-        }
-        signal.throwIfAborted();
-        await bb.storage.kv.set(grantKey(hostId), { intent });
-        signal.throwIfAborted();
-        const pending = intent;
-        const redeemed = await redeemMachineCode({ ...pending, signal }).catch(
-          () => {
-            signal.throwIfAborted();
-            return null;
-          },
-        );
-        if (redeemed === null)
-          return acquisitionFailure(
-            "Cloud device may need dashboard revocation: interrupted machine access acquisition",
-          );
+        if (existing && existing.grant.serverUrl === relay.status().url) return existing.grant;
+        const machine = machineSchema.parse(await relay.call("/api/machines", {}));
         const grant = {
           id: hostId,
-          serverUrl: redeemed.serverUrl,
-          headers: { "x-bb-connect-machine": redeemed.credential },
+          serverUrl: machine.serverUrl,
+          headers: { [MACHINE_CREDENTIAL_HEADER]: machine.credential },
         };
         await bb.storage.kv.set(grantKey(hostId), {
-          result: { connectMachineId: redeemed.machineId, grant },
+          result: { connectMachineId: machine.machineId, grant },
         });
         return grant;
       });
@@ -157,25 +91,8 @@ export async function registerServerAccess(
     release({ hostId }) {
       return serialized(async () => {
         const stored = await load(hostId);
-        if (!stored) return;
-        if ("intent" in stored) {
-          const reconciliation = await reconcile(
-            stored.intent,
-            AbortSignal.timeout(30_000),
-          );
-          if (typeof reconciliation !== "boolean")
-            throw new Error(reconciliation.message);
-          if (!reconciliation && stored.intent.expiresAt > Date.now())
-            throw new Error(
-              "Machine access acquisition is still unsettled; cleanup will retry after redemption or code expiry",
-            );
-        } else {
-          const credential = tunnel.getCredential();
-          if (!credential)
-            throw new Error(
-              "Pair this Cloudroom instance with Cloudroom Connect to revoke machine access",
-            );
-          await revokeMachine(credential, stored.result.connectMachineId);
+        if (stored) {
+          await relay.call("/api/machines/revoke", { machineId: stored.connectMachineId });
         }
         await bb.storage.kv.delete(grantKey(hostId));
       });

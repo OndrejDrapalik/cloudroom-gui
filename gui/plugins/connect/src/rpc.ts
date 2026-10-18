@@ -1,23 +1,16 @@
 import { z } from "zod";
 import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
-import {
-  ConnectListError,
-  connectCredentialSchema,
-  type DesktopSession,
-  type ListAccountServersResult,
-} from "@cloudroom/connect-client";
-import { ConnectPairError } from "./redeem.js";
+import { connectCredentialSchema } from "@cloudroom/connect-client";
 import type { ConnectTunnel } from "./tunnel.js";
 import type { PhoneRelay } from "./phone.js";
 import type { ConnectStatus, PhoneCode, ShareListing } from "./types.js";
-import { MachineCodeError, type MachineCode } from "./machine-code.js";
 import type { ShareHostResolver } from "./hosts.js";
-
-const pairInputSchema = z.object({
-  code: z.string().min(1),
-  server: z.string().url().optional(),
-  baseUrl: z.string().url().optional(),
-});
+import {
+  setupJobInputSchema,
+  setupJobStatusInputSchema,
+  type Mac,
+  type SetupJobs,
+} from "./macs.js";
 
 const portInputSchema = z
   .object({
@@ -38,7 +31,7 @@ const shareListingSchema: z.ZodType<ShareListing> = z
   })
   .strict();
 
-const stateSchema = z.enum(["disconnected", "pairing", "connected", "reconnecting"]);
+const stateSchema = z.enum(["disconnected", "connected", "reconnecting"]);
 
 const connectStatusSchema: z.ZodType<ConnectStatus> = z
   .object({
@@ -46,7 +39,6 @@ const connectStatusSchema: z.ZodType<ConnectStatus> = z
     paired: z.boolean(),
     handle: z.string().nullable(),
     url: z.string().nullable(),
-    dashboardUrl: z.string(),
     lastError: z.string().nullable(),
     nextRetryAt: z.number().nullable(),
     since: z.number(),
@@ -54,7 +46,6 @@ const connectStatusSchema: z.ZodType<ConnectStatus> = z
     lastRemoteActivityAt: z.number().nullable(),
     shares: z.array(shareListingSchema),
     signedIn: z.boolean(),
-    legacy: z.object({ url: z.string(), state: stateSchema }).strict().nullable(),
   })
   .strict();
 
@@ -62,56 +53,22 @@ const phoneCodeSchema: z.ZodType<PhoneCode> = z
   .object({ code: z.string(), expiresAt: z.number(), url: z.string() })
   .strict();
 
-const listAccountServersResultSchema: z.ZodType<ListAccountServersResult> = z
+const macSchema: z.ZodType<Mac> = z
   .object({
-    servers: z.array(
-      z
-        .object({
-          handle: z.string(),
-          name: z.string(),
-          live: z.boolean(),
-          url: z.string(),
-        })
-        .strict(),
-    ),
-    selfHandle: z.string(),
-  })
-  .strict();
-
-const desktopSessionSchema: z.ZodType<DesktopSession> = z
-  .object({
-    cookie: z
-      .object({
-        domain: z.string(),
-        expiresAt: z.number().int(),
-        name: z.string(),
-        value: z.string(),
-      })
-      .strict(),
-  })
-  .strict();
-
-const mobilePairingSchema = z
-  .object({
-    enabled: z.boolean(),
+    handle: z.string(),
+    name: z.string(),
+    online: z.boolean(),
+    self: z.boolean(),
+    hostId: z.string().nullable(),
+    settingUp: z.boolean(),
   })
   .strict();
 
 const remoteInstructionsSchema = z.object({ enabled: z.boolean() }).strict();
 const remoteInstructionsInputSchema = z.object({ enabled: z.boolean().optional() }).strict();
 
-const machineCodeSchema: z.ZodType<MachineCode> = z
-  .object({
-    code: z.string(),
-    expiresAt: z.number(),
-    serverUrl: z.string(),
-  })
-  .strict();
-
 export const connectRpcContract = defineRpcContract({
-  pair: { input: pairInputSchema, output: connectStatusSchema },
   status: { input: z.null(), output: connectStatusSchema },
-  disconnect: { input: z.null(), output: connectStatusSchema },
   phoneCode: { input: z.null(), output: phoneCodeSchema },
   signOutPhones: {
     input: z.null(),
@@ -130,71 +87,41 @@ export const connectRpcContract = defineRpcContract({
       .strict(),
   },
   listShares: { input: z.null(), output: z.array(shareListingSchema) },
-  listAccountServers: {
-    input: z.null(),
-    output: listAccountServersResultSchema,
-  },
-  createDesktopSession: { input: z.null(), output: desktopSessionSchema },
   /** This Mac's cloudroom.run key. The desktop app keeps it to list and open your other Macs. */
   relayCredential: { input: z.null(), output: connectCredentialSchema.nullable() },
-  mobilePairing: { input: z.null(), output: mobilePairingSchema },
   /** Read the "Tell agents about remote access" setting, or set it when `enabled` is given. */
   remoteInstructions: { input: remoteInstructionsInputSchema, output: remoteInstructionsSchema },
-  createMachineCode: { input: z.null(), output: machineCodeSchema },
+  /** Removes a remote host's access to this Mac. The server calls it when you remove the machine. */
   revokeMachine: {
     input: revokeMachineInputSchema,
     output: z.object({ ok: z.literal(true) }).strict(),
+  },
+  /** Every Mac signed in to this Cloudroom account, and which ones this Mac runs threads on. */
+  macs: { input: z.null(), output: z.object({ macs: z.array(macSchema) }).strict() },
+  /** Another of your Macs installs Cloudroom's machine helper here, so it can run threads on this Mac. */
+  runSetupJob: { input: setupJobInputSchema, output: z.object({ jobId: z.string() }).strict() },
+  setupJobStatus: {
+    input: setupJobStatusInputSchema,
+    output: z.object({ output: z.string(), exitCode: z.number().int().nullable() }).strict(),
   },
 });
 
 type ConnectRpcHandlers = PluginRpcHandlers<typeof connectRpcContract>;
 
-async function rethrowErrorCode<T>(
-  operation: () => Promise<T>,
-  isCoded: (error: unknown) => error is { code: string },
-): Promise<T> {
-  try {
-    return await operation();
-  } catch (error) {
-    if (isCoded(error)) throw new Error(error.code);
-    throw error;
-  }
-}
-
-export interface MobilePairingGate {
-  enabled(): Promise<boolean>;
-}
-
 export function createRpcHandlers(args: {
   relay: ConnectTunnel;
-  legacy: ConnectTunnel;
   phone: PhoneRelay;
   status: () => ConnectStatus;
   hostResolver: ShareHostResolver;
-  mobilePairing: MobilePairingGate;
   remoteInstructions: (enabled?: boolean) => Promise<boolean>;
+  listMacs: () => Promise<Mac[]>;
+  setupJobs: SetupJobs;
 }): ConnectRpcHandlers {
-  const { relay, legacy, phone, status, hostResolver, mobilePairing, remoteInstructions } = args;
+  const { relay, phone, status, hostResolver, remoteInstructions, listMacs, setupJobs } = args;
   const tunnel = relay;
   return {
-    async pair(args) {
-      await rethrowErrorCode(
-        () =>
-          legacy.pair({
-            code: args.code,
-            ...(args.server !== undefined ? { serverUrl: args.server } : {}),
-            ...(args.baseUrl !== undefined ? { baseUrl: args.baseUrl } : {}),
-          }),
-        (error) => error instanceof ConnectPairError,
-      );
-      return status();
-    },
     async status() {
       return { ...status(), shares: await relay.listShares() };
-    },
-    async disconnect() {
-      await legacy.disconnect();
-      return status();
     },
     async phoneCode() {
       return phone.phoneCode();
@@ -218,36 +145,24 @@ export function createRpcHandlers(args: {
     async listShares() {
       return tunnel.listShares();
     },
-    async listAccountServers() {
-      return rethrowErrorCode(
-        () => legacy.listAccountServers(),
-        (error) => error instanceof ConnectListError,
-      );
-    },
-    async createDesktopSession() {
-      return rethrowErrorCode(
-        () => legacy.createDesktopSession(),
-        (error) => error instanceof ConnectListError,
-      );
-    },
     async relayCredential() {
       return relay.getCredential();
-    },
-    async mobilePairing() {
-      return { enabled: await mobilePairing.enabled() };
     },
     async remoteInstructions(args) {
       return { enabled: await remoteInstructions(args.enabled) };
     },
-    async createMachineCode() {
-      return rethrowErrorCode(
-        () => legacy.createMachineCode(),
-        (error) => error instanceof MachineCodeError,
-      );
-    },
     async revokeMachine(args) {
-      await legacy.revokeMachine(args.machineId);
+      await phone.call("/api/machines/revoke", { machineId: args.machineId });
       return { ok: true };
+    },
+    async macs() {
+      return { macs: await listMacs() };
+    },
+    async runSetupJob(args) {
+      return setupJobs.start(args.command, args.stdin);
+    },
+    async setupJobStatus(args) {
+      return setupJobs.status(args.jobId, args.offset);
     },
   };
 }

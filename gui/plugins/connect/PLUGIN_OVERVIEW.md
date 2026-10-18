@@ -13,4 +13,4 @@ Connect registers this Mac by itself once you are signed in to Cloudroom. Get a 
 
 Agents use `room-cli connect expose <port>` to share previews. Inspect with `room-cli connect status` and `room-cli connect shares`; stop a share with `room-cli connect unexpose <port>`.
 
-Old getbb.app pairings keep working until December 7, 2026. `room-cli connect off` turns the old link off; `servers` and `machine-code` only apply to it.
+Your other Macs show up in Settings → Machines by themselves. Open one, or let this Mac run threads on it. Remote hosts reach this Mac through the same relay with their own revocable credential.

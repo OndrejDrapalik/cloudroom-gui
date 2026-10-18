@@ -178,61 +178,36 @@ truncation markers are preserved.
 
 Remote access (cloudroom connect):
 
-  Expose this cloudroom server at <handle>.getbb.app so you can reach it from any
-  browser. Claim a handle at https://getbb.app, copy the connect command it
-  generates, then run it here to
-  pair:
+  Cloudroom Connect opens this Mac's Cloudroom from a phone or another computer at
+  https://<id>.cloudroom.run. It sets itself up once you are signed in to Cloudroom:
+  the server registers with the relay, holds the tunnel itself, and reconnects on
+  restart. A phone signs in with a one-time code from cloudroom.dev/mobile.
 
-  room-cli connect --code <code> --server https://<handle>.getbb.app
-    --code <code>          One-time pairing code from the dashboard
-    --server <url>         https://<handle>.getbb.app (from the dashboard)
-
-  Pairing returns immediately: the Cloudroom SERVER redeems the code, stores the
-  credential, and holds the tunnel itself — so it stays up as long as Cloudroom is
-  running and reconnects on restart (no foreground process).
-
-  In a source checkout, `pnpm dev` automatically points the unpaired Connect
-  settings and code-only pairing at that worktree's local Cloud origin through
-  `BB_DEV_CONNECT_BASE_URL`. Explicit `--server` and `--base-url` targets still
-  win, so the dev cloudroom can also pair with getbb.app.
-
-  room-cli connect status                       Show the server's connect status
-  room-cli connect off                          Disconnect and forget the pairing
+  room-cli connect status                       Show remote-access status
+  room-cli connect phone-code                   Get a one-time code for cloudroom.dev/mobile
+  room-cli connect sign-out-phones              Sign out every phone and browser
   room-cli connect expose <port> [--host <name-or-id>]    Share a host's HTTP port
   room-cli connect unexpose <port> [--host <name-or-id>]  Stop sharing on that host
   room-cli connect shares [--host <name-or-id>]           List that host's shares
-  room-cli connect servers                      List every Cloudroom server on this account (handle, url, live)
-  room-cli connect machine-code                 Mint a one-time code that pairs the cloudroom mobile app
-                                          (needs the mobileApp experiment)
 
   Port sharing works from threads on any enrolled host. In a thread,
   `room-cli connect expose <port>` resolves the thread environment's host; outside a
   thread it defaults to the server host. `--host <name-or-id>` overrides that
   choice for expose, unexpose, and shares. Server-host URLs use
-  `https://<server-label>--<port>.getbb.app`; machine-host URLs use
-  `https://<machine-label>--<port>.getbb.app` and proxy directly through that
-  machine's daemon. Access is owner-session-gated — only viewers signed into
-  the owner's getbb.app account can open the URL; it is not a public internet
-  link. Agents should run expose from the thread that started the server, share
-  the returned URL, and unexpose from the same thread when it stops.
-  `room-cli connect status` shows all shares with host + URL. `shares --json` returns
-  the resolved `host` and rows with `hostId`, `hostName`, `port`, and `url`.
+  `https://<id>--<port>.cloudroom.run`; remote-host URLs use
+  `https://<machine-id>--<port>.cloudroom.run` and proxy directly through that
+  machine's daemon. Only phones and browsers signed in to this Mac can open them;
+  they are not public internet links. Agents should run expose from the thread that
+  started the server, share the returned URL, and unexpose from the same thread when
+  it stops. `room-cli connect status` shows all shares with host + URL. `shares --json`
+  returns the resolved `host` and rows with `hostId`, `hostName`, `port`, and `url`.
 
-  The cloudroom mobile app pairs with a paired cloudroom through cloudroom connect. Turn on the
-  `mobileApp` experiment first (`room-cli settings experiment mobileApp true`, or
-  Settings → Experiments → Mobile app); the surfaces below stay hidden without
-  it. Settings → Remote access → Add mobile device shows a QR code plus the code as text;
-  `room-cli connect machine-code` prints the same code, server URL, apex, and expiry
-  (`--json` for `{code, serverUrl, apex, expiresAt}`). The phone scans or
-  types the code and enrolls as a connect machine on the account with its own
-  revocable credential (it appears in the getbb.app dashboard machine list).
-  Codes last 10 minutes and work once; an account-machine-limit failure says
-  so and points at the dashboard to revoke an unused device.
+  Remote hosts added in Settings → Machines reach this Mac through the same relay
+  with their own credential. Removing the machine revokes it.
 
-  Remote access is owned by the builtin "connect" plugin (Plugins → connect
-  shows the URL, QR code, mobile pairing, and shared ports). Disabling the
-  plugin (`room-cli plugin disable connect`) cuts off all remote access; re-enable
-  with `room-cli plugin enable connect`.
+  Remote access is owned by the builtin "connect" plugin. Disabling the plugin
+  (`room-cli plugin disable connect`) cuts off all remote access; re-enable with
+  `room-cli plugin enable connect`.
 
 Core owns environment retirement and teardown. After the last live thread is archived or deleted, the provider policy sets the retirement deadline. `room-cli environment show <id>` reports lifecycle phase and teardown status, attempt and failure message. Failed teardown retries automatically; checkout environments do not retire.
 

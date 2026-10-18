@@ -4,11 +4,11 @@ set -eu
 
 usage() {
   cat >&2 <<'EOF'
-Usage: install.sh --join-code <code> --host-id <host-id> --server <url> [--machine-code <code>] [--host-daemon-port <port>]
+Usage: install.sh --join-code <code> --host-id <host-id> --server <url> [--host-daemon-port <port>]
        install.sh --bootstrap-env <NAME>
        install.sh --start|--stop|--uninstall --host-id <host-id> [--server-url <url>] [--data-dir <path>]
 
-The first three options are required. --machine-code is required through Cloudroom Connect.
+The first three options are required.
 By default, the installer assigns this enrolled daemon its own local API port.
 EOF
   exit 2
@@ -18,7 +18,6 @@ bootstrap_env=
 join_code=
 host_id=
 server_url=
-machine_code=
 requested_host_daemon_port=
 lifecycle_action=
 requested_data_dir=
@@ -26,7 +25,6 @@ requested_data_dir=
 CURL_CONNECT_TIMEOUT_SECONDS=10
 PACKAGE_DOWNLOAD_TIMEOUT_SECONDS=300
 PACKAGE_DOWNLOAD_RETRIES=3
-MACHINE_CODE_REDEEM_TIMEOUT_SECONDS=30
 DAEMON_WAIT_ATTEMPTS=60
 WAIT_PROGRESS_EVERY_ATTEMPTS=5
 
@@ -262,7 +260,7 @@ run_lifecycle() {
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --bootstrap-env|--join-code|--host-id|--server|--server-url|--machine-code|--host-daemon-port|--data-dir)
+    --bootstrap-env|--join-code|--host-id|--server|--server-url|--host-daemon-port|--data-dir)
       [ "$#" -ge 2 ] || usage
       [ -n "$2" ] || usage
       case "$1" in
@@ -271,7 +269,6 @@ while [ "$#" -gt 0 ]; do
         --host-id) host_id=$2 ;;
         --server) server_url=$2 ;;
         --server-url) server_url=$2 ;;
-        --machine-code) machine_code=$2 ;;
         --host-daemon-port) requested_host_daemon_port=$2 ;;
         --data-dir) requested_data_dir=$2 ;;
       esac
@@ -291,9 +288,9 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ -n "$lifecycle_action" ]; then
-  [ -z "$bootstrap_env$join_code$machine_code$requested_host_daemon_port" ] || usage
+  [ -z "$bootstrap_env$join_code$requested_host_daemon_port" ] || usage
 elif [ -n "$bootstrap_env" ]; then
-  if [ -n "$join_code$host_id$server_url$machine_code" ]; then usage; fi
+  if [ -n "$join_code$host_id$server_url" ]; then usage; fi
   host_id=$(node -e '
     const name = process.argv[1];
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) process.exit(2);
@@ -677,64 +674,6 @@ if [ -n "$bootstrap_env" ]; then
   fi
   ROOM_ENROLLMENT="$bootstrap_payload" ROOM_DATA_DIR="$data_dir" "$bb_cli" machine enroll --bootstrap-env ROOM_ENROLLMENT
   bootstrap_payload=
-fi
-
-if [ -n "$machine_code" ]; then
-  connect_apex=$(node -e '
-    const url = new URL(process.argv[1]);
-    const labels = url.hostname.split(".");
-    if (labels.length < 3) process.exit(2);
-    url.hostname = labels.slice(1).join(".");
-    url.pathname = "/";
-    url.search = "";
-    url.hash = "";
-    process.stdout.write(url.origin);
-  ' "$server_url" 2>/dev/null) || {
-    fail_step "Could not derive the Cloudroom Connect apex from $server_url."
-    exit 1
-  }
-  active_step "Authorizing this machine with Cloudroom Connect"
-  redeem_response=$(curl -fsS \
-    --connect-timeout "$CURL_CONNECT_TIMEOUT_SECONDS" \
-    --max-time "$MACHINE_CODE_REDEEM_TIMEOUT_SECONDS" \
-    -X POST \
-    -H 'content-type: application/json' \
-    --data "{\"code\":\"$machine_code\"}" \
-    "$connect_apex/api/connect/redeem-machine") || {
-    fail_step "Could not redeem the Cloudroom Connect machine code."
-    exit 1
-  }
-  printf '%s' "$redeem_response" | node -e '
-    let input = "";
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk) => { input += chunk; });
-    process.stdin.on("end", () => {
-      const body = JSON.parse(input);
-      if (typeof body.credential !== "string" || !body.credential.startsWith("bbcm_")) {
-        process.exit(2);
-      }
-      if (typeof body.machineId !== "string" || body.machineId.length === 0) {
-        process.exit(2);
-      }
-      const fs = require("node:fs");
-      const path = require("node:path");
-      const [dataDir, serverUrl] = process.argv.slice(1);
-      const configPath = path.join(dataDir, "config.json");
-      let config = {};
-      try { config = JSON.parse(fs.readFileSync(configPath, "utf8")); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-      config.serverUrl = serverUrl;
-      config.machineCredential = body.credential;
-      config.connectMachineId = body.machineId;
-      const temporary = `${configPath}.${process.pid}.tmp`;
-      fs.writeFileSync(temporary, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-      fs.renameSync(temporary, configPath);
-    });
-  ' "$data_dir" "$server_url" || {
-    fail_step "The Cloudroom Connect machine-code response was invalid."
-    exit 1
-  }
-  complete_step "Authorized this machine with Cloudroom Connect"
 fi
 
 auth_matches_host() {

@@ -1,14 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import type {
-  AgentRuntimeBridgeLaunch,
-  AgentRuntimeOptions,
+import {
+  AgentRuntimeTurnBusyError,
+  type AgentRuntimeBridgeLaunch,
+  type AgentRuntimeOptions,
 } from "@cloudroom/agent-runtime";
 import type {
   HostDaemonBridgeLaunch,
   HostDaemonCommand,
 } from "@cloudroom/host-daemon-contract";
 import {
+  createStandaloneBuiltinCompactCommandInput,
   encodeClientTurnRequestIdNumber,
   type ClientTurnRequestId,
   type PromptInput,
@@ -1964,6 +1966,75 @@ describe("thread command dispatch", () => {
     expect(steeredTurnIds).toEqual(["turn-old", "turn-new"]);
     expect(waitCalls).toBe(1);
     expect(harness.runtimeState.ranTurnClientRequestId).toBeUndefined();
+  });
+
+  it("steers a start turn.submit into a turn the provider started on its own", async () => {
+    const harness = createHarness();
+    await harness.manager.ensureEnvironment({
+      environmentId: "env-1",
+      workspacePath: "/tmp/env-1",
+    });
+    harness.threadControls.setActiveTurn("thread-1", "turn-self");
+    harness.runtime.runTurn = async (args) => {
+      throw new AgentRuntimeTurnBusyError(args.threadId);
+    };
+    const submitStart = (
+      requestId: ClientTurnRequestId,
+      input: PromptInput[],
+    ) =>
+      dispatchCommand(
+        {
+          bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+          type: "turn.submit",
+          environmentId: "env-1",
+          threadId: "thread-1",
+          requestId,
+          input,
+          options: {
+            model: "gpt-5",
+            serviceTier: "default",
+            reasoningLevel: "medium",
+            providerOptions: {},
+            permissionMode: "full",
+            permissionScope: "full",
+            approvalReviewer: null,
+            permissionEscalation: null,
+          },
+          resumeContext: {
+            bridgeLaunch: DISPATCH_TEST_BRIDGE_LAUNCH,
+            workspaceContext: {
+              workspacePath: "/tmp/env-1",
+            },
+            projectId: "project-1",
+            providerId: "fake",
+            providerThreadId: "provider-thread-1",
+            instructions: "Be a helpful coding agent.",
+            dynamicTools: [],
+            contributedEnv: [],
+            injectedSkillSources: [],
+            instructionMode: "append",
+          },
+          target: { mode: "start" },
+        },
+        harness.dispatchOptions(),
+      );
+
+    await expect(
+      submitStart(
+        nextClientRequestId(),
+        createStandaloneBuiltinCompactCommandInput(),
+      ),
+    ).rejects.toThrow("competing turn");
+    expect(harness.runtimeState.steeredTurnId).toBeUndefined();
+
+    const requestId = nextClientRequestId();
+    const result = await submitStart(requestId, [
+      textPromptInput("message sent as the agent woke up"),
+    ]);
+
+    expect(result).toEqual({ appliedAs: "steer" });
+    expect(harness.runtimeState.steeredTurnId).toBe("turn-self");
+    expect(harness.runtimeState.steeredClientRequestId).toBe(requestId);
   });
 
   it("falls back to a new turn when explicit steer sees a stale turn", async () => {

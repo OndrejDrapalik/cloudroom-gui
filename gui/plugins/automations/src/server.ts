@@ -13,6 +13,7 @@ import { registerAutomationCli } from "./cli.js";
 import { publishAutomationChange, REVIEW_SIGNAL_PROJECT } from "./realtime.js";
 import { backfillCloudRuns, recordCloudRun } from "./review.js";
 import { createAutomationService } from "./service.js";
+import { pollWebhooks } from "./hooks.js";
 import { sleep, sweepDueAutomations, SWEEP_INTERVAL_MS } from "./sweep.js";
 
 function resolveServerUrl(): string {
@@ -93,5 +94,10 @@ export default async function plugin(bb: BbPluginApi) {
         await sleep(SWEEP_INTERVAL_MS, signal);
       }
     },
+  });
+
+  // Local webhook loops get their events from the website (ADR 0262).
+  bb.background.service("automation-webhooks", {
+    start: (signal) => pollWebhooks(bb, db, service, signal),
   });
 }

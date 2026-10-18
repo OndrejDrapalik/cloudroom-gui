@@ -2,6 +2,20 @@
 
 Also on [cloudroom.dev/changelog](https://www.cloudroom.dev/changelog).
 
+## 109
+
+Webhook Loops and Cloud without GitHub (2026-10-18)
+
+### Changes
+
+- Loops can start from a webhook, and the New button lets you pick the trigger.
+- Cloud threads work for projects not on GitHub, including subagents, forks, and Loops.
+- Downloads and builds keep a Cloud sandbox awake for up to 2 hours, so idle sleep no longer kills them.
+- Save any Cloud file to your Downloads folder from the side panel.
+- room-cli cloud teleport --check tests if a thread can move to Cloud, and the old Local worktree is cleaned up 2 days after the move.
+- Extra Claude accounts keep claude.ai connectors in Local threads, and a queued /clear runs only once.
+- Archived worktrees are deleted after 21 days by default, plus onboarding and security fixes.
+
 ## 108
 
 Cloud subagents with your Mac closed (2026-10-17)

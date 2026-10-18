@@ -95,7 +95,7 @@ async function revokeConnectMachineCredential(
   } catch (error) {
     deps.logger.error(
       { err: error, machineId },
-      "Host was removed locally, but its Cloudroom Connect machine credential could not be revoked. Revoke this machine manually from the getbb.app dashboard.",
+      "Host was removed locally, but its Cloudroom Connect machine credential could not be revoked. Its relay access stays until the Mac signs out of Cloudroom.",
     );
   }
 }

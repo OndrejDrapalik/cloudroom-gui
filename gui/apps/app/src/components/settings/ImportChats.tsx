@@ -9,7 +9,7 @@ import { useHostDaemon } from "@/hooks/useHostDaemon";
 import { getProviderIconInfo, getProviderIconTintStyle } from "@/lib/provider-icon";
 
 export const DAY_MS = 86_400_000;
-const APPS = [["claude-code", "Claude Code"], ["codex", "Codex"], ["pi", "Pi"], ["acp-hermes-agent", "Hermes"]] as const;
+const APPS = [["claude-code", "Claude Code"], ["codex", "Codex"], ["pi", "Pi"], ["acp-hermes-agent", "Hermes"], ["t3code", "T3 Code"]] as const;
 export const RANGES = [["last 7 days", 7], ["last 30 days", 30], ["all time", null]] as const;
 export const PALETTE = {
   "--ic-ink": "var(--ob-ink, var(--foreground))",
@@ -124,7 +124,7 @@ export function ImportChatsSettingsSection() {
   return (
     <SettingsSection
       title="Import chats"
-      description="Bring your Claude Code, Codex, Pi, and Hermes chats over as Local threads. The agent keeps its full memory, except Hermes, which gets the messages as text. Your originals stay untouched."
+      description="Bring your Claude Code, Codex, Pi, Hermes, and T3 Code chats over as Local threads. The agent keeps its full memory. Hermes chats, and T3 Code chats from agents other than Claude Code and Codex, come over as text. Your originals stay untouched."
     >
       <ImportChats />
     </SettingsSection>

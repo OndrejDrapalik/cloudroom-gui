@@ -34,6 +34,7 @@ interface SecondaryPanelFilePreviewProps {
   onSelectionAddToChat?: (text: string) => void;
   onOpenInEditor?: (path: string) => void;
   onRevealInFinder?: (path: string) => void;
+  onDownload?: (path: string) => void;
   onRefresh?: () => void;
   statusLabel?: WorkspaceFilePreviewStatusLabel | null;
 }
@@ -167,6 +168,7 @@ export function SecondaryPanelFilePreview({
   onSelectionAddToChat,
   onOpenInEditor,
   onRevealInFinder,
+  onDownload,
   onRefresh,
   statusLabel = null,
 }: SecondaryPanelFilePreviewProps) {
@@ -185,6 +187,7 @@ export function SecondaryPanelFilePreview({
       onSelectionAddToChat={onSelectionAddToChat}
       onOpenInEditor={onOpenInEditor}
       onRevealInFinder={onRevealInFinder}
+      onDownload={onDownload}
       onRefresh={onRefresh}
       isRefreshing={isRefreshing}
       markdownLinkRouting={

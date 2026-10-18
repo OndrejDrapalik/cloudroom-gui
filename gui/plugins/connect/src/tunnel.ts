@@ -11,19 +11,10 @@ import {
 } from "@cloudroom/tunnel-client";
 import type { PluginLogger } from "@get-bb/plugin-sdk";
 import {
-  ConnectListError,
   deriveConnectBaseUrl,
-  fetchDesktopSession,
-  listAccountServers,
-  serverUrlForHandle,
   type ConnectCredential,
-  type DesktopSession,
-  type ListAccountServersResult,
 } from "@cloudroom/connect-client";
 import type { CredentialStore } from "./credential.js";
-import { fetchMachineCode, MachineCodeError } from "./machine-code.js";
-import { asConnectPairError, redeemConnectCode } from "./redeem.js";
-import { revokeMachine } from "./revoke-machine.js";
 import {
   ShareRegistry,
   shareLoopbackHost,
@@ -34,33 +25,15 @@ import {
 import type { ShareHost } from "./hosts.js";
 import type { ConnectStateName, ShareListing, TunnelStatus } from "./types.js";
 
-const DISCONNECT_TIMEOUT_MS = 5_000;
 const TUNNEL_HANDSHAKE_TIMEOUT_MS = 15_000;
-
-async function notifyCloudOfDisconnect(
-  credential: ConnectCredential,
-): Promise<void> {
-  const response = await fetch(
-    new URL("/api/connect/disconnect", credential.serverUrl),
-    {
-      method: "POST",
-      headers: { "x-bb-connect-machine": credential.credential },
-      signal: AbortSignal.timeout(DISCONNECT_TIMEOUT_MS),
-    },
-  );
-  if (!response.ok && response.status !== 401 && response.status !== 403) {
-    throw new Error(`Cloud returned HTTP ${response.status}`);
-  }
-}
 
 interface ConnectTunnelOptions {
   store: CredentialStore;
   shares: ShareRegistry;
-  defaultBaseUrl: string;
   getLoopbackBaseUrl: () => string;
   log: PluginLogger;
   onStatusChange?: (status: TunnelStatus) => void;
-  onCredentialRejected?: () => void;
+  onCredentialRejected: () => void;
 }
 
 export class ConnectTunnel {
@@ -68,7 +41,6 @@ export class ConnectTunnel {
   private tunnel: NodeWebSocket | undefined;
   private session: TunnelSession | undefined;
   private connected = false;
-  private pairing = false;
   private lastError: string | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly backoff = new ReconnectBackoff();
@@ -98,49 +70,6 @@ export class ConnectTunnel {
     this.publish();
   }
 
-  async pair(args: {
-    code: string;
-    serverUrl?: string;
-    baseUrl?: string;
-  }): Promise<TunnelStatus> {
-    const baseUrl =
-      args.baseUrl ??
-      (args.serverUrl !== undefined
-        ? deriveConnectBaseUrl(args.serverUrl)
-        : this.options.defaultBaseUrl);
-    this.pairing = true;
-    this.publish();
-    try {
-      let redeemed;
-      try {
-        redeemed = await redeemConnectCode({ code: args.code, baseUrl });
-      } catch (error) {
-        const pairError = asConnectPairError(error);
-        this.options.log.warn(
-          `pair failed (${pairError.code}): ${pairError.message}`,
-        );
-        throw pairError;
-      }
-      const serverUrl = (
-        args.serverUrl ?? serverUrlForHandle(baseUrl, redeemed.handle)
-      ).replace(/\/$/, "");
-      const credential: ConnectCredential = {
-        serverUrl,
-        handle: redeemed.handle,
-        credential: redeemed.credential,
-      };
-      await this.options.store.write(credential);
-      this.credential = credential;
-      this.lastError = null;
-      this.reconnect();
-      this.startShareActivation();
-    } finally {
-      this.pairing = false;
-      this.publish();
-    }
-    return this.status();
-  }
-
   async useCredential(credential: ConnectCredential): Promise<void> {
     await this.options.store.write(credential);
     this.credential = credential;
@@ -153,31 +82,10 @@ export class ConnectTunnel {
   async forget(): Promise<void> {
     this.teardown();
     await this.options.store.clear();
-    this.credential = null;
-    this.lastError = null;
-    this.publish();
-  }
-
-  async disconnect(): Promise<TunnelStatus> {
-    const credential = this.credential;
-    this.teardown();
-    await this.options.store.clear();
     this.options.shares.clearMachineDeclarations();
     this.credential = null;
     this.lastError = null;
     this.publish();
-    if (credential !== null) {
-      try {
-        await notifyCloudOfDisconnect(credential);
-      } catch (error) {
-        this.options.log.warn(
-          `Cloud disconnect could not be confirmed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-    return this.status();
   }
 
   async expose(port: number, host: ShareHost): Promise<ShareListing> {
@@ -199,40 +107,6 @@ export class ConnectTunnel {
     return this.options.shares.list(hostId);
   }
 
-  async listAccountServers(): Promise<ListAccountServersResult> {
-    const credential = this.credential;
-    if (credential === null) {
-      throw new ConnectListError(
-        "not_paired",
-        "this Cloudroom server is not connected to getbb.app — run `room-cli connect` for how to pair",
-      );
-    }
-    return listAccountServers(credential);
-  }
-
-  async createDesktopSession(): Promise<DesktopSession> {
-    if (this.credential === null) {
-      throw new ConnectListError(
-        "not_paired",
-        "this Cloudroom server is not connected",
-      );
-    }
-    return fetchDesktopSession(this.credential);
-  }
-
-  async createMachineCode() {
-    if (this.credential === null) {
-      throw new MachineCodeError("not_paired");
-    }
-    return fetchMachineCode(this.credential, AbortSignal.timeout(10_000));
-  }
-
-  async revokeMachine(machineId: string): Promise<void> {
-    const credential = this.getCredential();
-    if (credential === null) throw new Error("not_paired");
-    await revokeMachine(credential, machineId);
-  }
-
   status(): TunnelStatus {
     return this.statusWithShares(this.options.shares.snapshot());
   }
@@ -248,7 +122,6 @@ export class ConnectTunnel {
       paired: this.credential !== null,
       handle: this.credential?.handle ?? null,
       url: this.credential?.serverUrl ?? null,
-      dashboardUrl: this.dashboardUrl(),
       lastError: this.lastError,
       nextRetryAt: state === "reconnecting" ? this.nextRetryAt : null,
       since: this.stateSince,
@@ -258,21 +131,12 @@ export class ConnectTunnel {
     };
   }
 
-  private dashboardUrl(): string {
-    const base =
-      this.credential !== null
-        ? deriveConnectBaseUrl(this.credential.serverUrl)
-        : this.options.defaultBaseUrl;
-    return `${base.replace(/\/$/, "")}/dashboard`;
-  }
-
   stop(): void {
     this.teardown();
     this.publish();
   }
 
   private computeState(): ConnectStateName {
-    if (this.pairing) return "pairing";
     if (this.credential === null) return "disconnected";
     return this.connected ? "connected" : "reconnecting";
   }
@@ -353,10 +217,7 @@ export class ConnectTunnel {
   }
 
   private credentialRejected(statusCode: number): void {
-    this.lastError = this.options.onCredentialRejected
-      ? `Cloudroom Connect rejected this Mac's credential (HTTP ${statusCode}); registering again`
-      : `the gate rejected this Cloudroom server's credential (HTTP ${statusCode}) — ` +
-        "pairing was revoked; get a new code from the getbb.app dashboard and re-pair";
+    this.lastError = `Cloudroom Connect rejected this Mac's credential (HTTP ${statusCode}); registering again`;
     this.options.log.warn(this.lastError);
     this.credential = null;
     this.teardown();
@@ -370,7 +231,7 @@ export class ConnectTunnel {
           }`,
         );
       })
-      .then(() => this.options.onCredentialRejected?.());
+      .then(() => this.options.onCredentialRejected());
   }
 
   private resolveStreamOrigin(target: string | undefined): StreamOriginResult {
@@ -523,7 +384,7 @@ function connectApexHost(serverUrl: string): string {
   try {
     return new URL(deriveConnectBaseUrl(serverUrl)).host;
   } catch {
-    return "getbb.app";
+    return "cloudroom.run";
   }
 }
 

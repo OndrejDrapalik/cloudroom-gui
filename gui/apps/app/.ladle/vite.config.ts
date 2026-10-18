@@ -32,7 +32,7 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: [".getbb.app"],
+    allowedHosts: [".cloudroom.run"],
     proxy: {
       "/api": {
         target: devInstance.serverUrl,

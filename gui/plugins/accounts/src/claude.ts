@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   accessSync,
@@ -11,6 +11,7 @@ import {
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { z } from "zod";
 import { readClaudeToken } from "@cloudroom/process-utils/claude-token";
 import type { UsageWindow } from "./contract.js";
@@ -36,9 +37,23 @@ function claudeBinary(): string | null {
   return null;
 }
 
+// A stray token or API key would win over the account's own login.
+export function profileEnv(profile: string): NodeJS.ProcessEnv {
+  if (!path.isAbsolute(profile)) throw new Error("Claude profile folder must be absolute.");
+  const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: profile };
+  for (const key of [
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_SUBSCRIPTION_TYPE",
+    "CLAUDE_SECURESTORAGE_CONFIG_DIR",
+  ])
+    delete env[key];
+  return env;
+}
+
 interface Run {
   url: string | null;
-  token: string | null;
+  result: string | null;
   error: string | null;
   stop: () => void;
 }
@@ -46,7 +61,9 @@ interface Run {
 export class ClaudeLogin {
   private readonly runs = new Map<string, Run>();
 
-  async start(): Promise<{ sessionId: string; authorizeUrl: string }> {
+  async start(
+    profile?: string,
+  ): Promise<{ sessionId: string; authorizeUrl: string }> {
     const binary = claudeBinary();
     if (!binary)
       throw new Error("Install Claude Code on this computer, then try again.");
@@ -55,14 +72,14 @@ export class ClaudeLogin {
     writeFileSync(browser, `#!/bin/sh\nprintf '%s' "$1" > "$0.url"\n`, {
       mode: 0o700,
     });
-    const command = `stty cols 1000; exec "$CLAUDE_BIN" setup-token`;
+    const command = `stty cols 1000; exec "$CLAUDE_BIN" ${profile ? "auth login --claudeai" : "setup-token"}`;
     const tty =
       process.platform === "linux"
         ? `/usr/bin/script -q -c '${command}' /dev/null`
         : `/usr/bin/script -q /dev/null /bin/sh -c '${command}'`;
     const child = spawn("/bin/sh", ["-c", `sleep 600 | { ${tty}; kill 0; }`], {
       env: {
-        ...process.env,
+        ...(profile ? profileEnv(profile) : process.env),
         CLAUDE_BIN: binary,
         SHELL: "/bin/sh",
         BROWSER: browser,
@@ -71,9 +88,9 @@ export class ClaudeLogin {
       detached: true,
     });
     const sessionId = randomUUID();
-    const run: Run = { url: null, token: null, error: null, stop: () => {} };
+    const run: Run = { url: null, result: null, error: null, stop: () => {} };
     const finish = (error: string | null) => {
-      if (run.token === null) run.error ??= error;
+      if (run.result === null) run.error ??= error;
       clearTimeout(timer);
       try {
         process.kill(-child.pid!);
@@ -86,18 +103,24 @@ export class ClaudeLogin {
       10 * 60_000,
     );
     let output = "";
+    let signedIn = false;
     child.stdout.on("data", (chunk: Buffer) => {
       output = (output + chunk.toString()).slice(-65536);
+      if (profile) {
+        signedIn ||= output.includes("Login successful");
+        return;
+      }
       const token = readClaudeToken(output);
-      if (token && run.token === null) {
-        run.token = token;
+      if (token && run.result === null) {
+        run.result = token;
         finish(null);
       }
     });
     child.on("error", () => finish("Could not start Claude Code."));
-    child.on("close", () =>
-      finish("Claude sign-in did not finish. Try again."),
-    );
+    child.on("close", () => {
+      if (profile && signedIn) run.result ??= profile;
+      finish("Claude sign-in did not finish. Try again.");
+    });
     this.runs.set(sessionId, run);
     for (
       let waited = 0;
@@ -119,9 +142,9 @@ export class ClaudeLogin {
   poll(sessionId: string): string | null {
     const run = this.runs.get(sessionId);
     if (!run) throw new Error("This sign-in expired. Start again.");
-    if (run.token) {
+    if (run.result) {
       this.runs.delete(sessionId);
-      return run.token;
+      return run.result;
     }
     if (run.error) {
       this.runs.delete(sessionId);
@@ -193,4 +216,53 @@ export async function localClaudeEmail(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+const run = promisify(execFile);
+
+export async function profileAccount(profile: string) {
+  const binary = claudeBinary();
+  if (!binary) throw new Error("Install Claude Code on this computer, then try again.");
+  const { stdout } = await run(binary, ["auth", "status", "--json"], {
+    env: profileEnv(profile),
+    timeout: 30_000,
+  });
+  const status = z
+    .object({
+      loggedIn: z.literal(true),
+      email: z.string().nullish(),
+      orgId: z.string().nullish(),
+      subscriptionType: z.string().nullish(),
+    })
+    .parse(JSON.parse(stdout));
+  return {
+    email: status.email ?? null,
+    orgId: status.orgId ?? null,
+    plan: status.subscriptionType ?? null,
+  };
+}
+
+export async function signOut(profile: string): Promise<void> {
+  const binary = claudeBinary();
+  if (binary)
+    await run(binary, ["auth", "logout"], {
+      env: profileEnv(profile),
+      timeout: 30_000,
+    }).catch(() => {});
+}
+
+// Every Anthropic reply names the token's organization. Listing models uses no usage.
+export async function tokenOrganization(token: string): Promise<string | null> {
+  const response = await fetch("https://api.anthropic.com/v1/models?limit=1", {
+    headers: {
+      authorization: `Bearer ${token}`,
+      "anthropic-beta": "oauth-2025-04-20",
+      "anthropic-version": "2023-06-01",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  await response.body?.cancel();
+  if (response.status === 401)
+    throw new SignInAgainError("Claude rejected this login. Sign in again.");
+  return response.headers.get("anthropic-organization-id");
 }

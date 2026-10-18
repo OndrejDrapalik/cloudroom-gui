@@ -94,7 +94,7 @@ async function processDueAutomation(
     const trigger = parseAutomationTrigger(args.automation.triggerConfig);
     execution = parseAutomationExecution(args.automation.execution);
     newNextRunAt =
-      trigger.triggerType === "once"
+      trigger.triggerType !== "schedule"
         ? null
         : computeNextScheduledTime({
             cron: trigger.cron,

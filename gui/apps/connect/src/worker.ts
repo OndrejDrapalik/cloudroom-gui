@@ -6,6 +6,7 @@ import {
   MACHINE_CREDENTIAL_HEADER,
   PHONE_SESSION_HEADER,
   SESSION_COOKIE,
+  TUNNEL_MACHINE_HEADER,
   TUNNEL_SESSION_HEADER,
   TUNNEL_TARGET_HEADER,
 } from "./protocol-headers.js";
@@ -18,14 +19,18 @@ import {
   codeHandle,
   consumeCode,
   createCode,
+  createMachine,
   createSession,
+  deleteMachine,
   formatCode,
+  machineByCredential,
   normalizeCode,
   phoneUser,
   registerServer,
   revokeSessions,
   serverByCredential,
   serverByHandle,
+  serverById,
   sessionByToken,
   setServerName,
   sha256Hex,
@@ -43,6 +48,8 @@ const TOKEN = /^[a-f0-9]{64}$/;
 const HANDLE = /^[a-z0-9]{1,63}$/;
 const PUBLIC_APP_FILES =
   /^\/(?:manifest[\w-]*\.webmanifest|apple-touch-icon[\w-]*\.png|icon-[\w-]+\.png|favicon[\w.-]*)$/;
+/** What a new remote host downloads before it has a credential. The Mac checks the one-time enrollment itself. */
+const INSTALL_PATHS = new Set(["/install.sh", "/install/version", "/install/bb-app.tgz"]);
 
 interface Visitor {
   handle: string;
@@ -149,11 +156,16 @@ export function readCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-export function requestForTunnelDo(request: Request, target: string | null): Request {
+export function requestForTunnelDo(
+  request: Request,
+  target: string | null,
+  machineId: string | null = null,
+): Request {
   const headers = new Headers(request.headers);
   for (const name of [
     TUNNEL_TARGET_HEADER,
     TUNNEL_SESSION_HEADER,
+    TUNNEL_MACHINE_HEADER,
     MACHINE_CREDENTIAL_HEADER,
     GATE_AUTH_HEADER,
     GATE_MACHINE_ID_HEADER,
@@ -168,12 +180,26 @@ export function requestForTunnelDo(request: Request, target: string | null): Req
   if (cookie) headers.set("cookie", cookie);
   else headers.delete("cookie");
   if (target !== null) headers.set(TUNNEL_TARGET_HEADER, target);
-  const token = readCookie(request.headers.get("cookie"), SESSION_COOKIE);
-  if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && token) {
-    headers.set(TUNNEL_SESSION_HEADER, token);
+  const upgrade = request.headers.get("upgrade")?.toLowerCase() === "websocket";
+  if (machineId !== null) {
+    headers.set(GATE_AUTH_HEADER, "machine");
+    headers.set(GATE_MACHINE_ID_HEADER, machineId);
+    if (upgrade) headers.set(TUNNEL_MACHINE_HEADER, machineId);
+    return new Request(request, { headers });
   }
+  const token = readCookie(request.headers.get("cookie"), SESSION_COOKIE);
+  if (upgrade && token) headers.set(TUNNEL_SESSION_HEADER, token);
   headers.set(GATE_AUTH_HEADER, "session");
   return new Request(request, { headers });
+}
+
+/** Remote hosts may run threads but not change which machines this Mac trusts. */
+function isHostManagementMutation(request: Request, pathname: string): boolean {
+  if (request.method === "POST" && (pathname === "/internal/hosts/enroll-key" || pathname === "/api/v1/hosts/join-codes")) {
+    return true;
+  }
+  if (request.method === "PATCH" && /^\/api\/v1\/hosts\/[^/]+\/permission-ceiling$/u.test(pathname)) return true;
+  return (request.method === "PATCH" || request.method === "DELETE") && /^\/api\/v1\/hosts\/[^/]+$/u.test(pathname);
 }
 
 export function safeReturnPath(value: string | null): string {
@@ -229,9 +255,43 @@ async function cloud(request: Request, path: string, url: URL, env: Env, token: 
   return response ?? json({ error: "Cloudroom is unreachable. Try again." }, 502);
 }
 
+/** Adds a remote host that runs threads for this Mac. Its daemon sends the credential to reach the Mac. */
+async function addMachine(request: Request, env: Env, owner: Server): Promise<Response> {
+  const machine = await createMachine(env.DB, owner, computerName((await readJson(request)).name));
+  if (!machine) return json({ error: "machine_limit" }, 409);
+  return json({
+    machineId: machine.id,
+    credential: machine.credential,
+    serverUrl: serverOrigin(owner, null, env),
+  });
+}
+
+async function removeMachine(request: Request, env: Env, owner: Server): Promise<Response> {
+  const machineId = (await readJson(request)).machineId;
+  if (typeof machineId !== "string" || !machineId) return json({ error: "Missing machineId." }, 400);
+  const handle = await deleteMachine(env.DB, owner.id, machineId);
+  if (handle !== null) {
+    const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(handle));
+    await stub.fetch(new Request(`https://${handle}.${env.BASE_DOMAIN}/__control/close`)).catch(() => {});
+  }
+  return json({ ok: true });
+}
+
+/** A remote host's daemon asks for its own address, which carries the ports it shares. */
+async function machineLabel(request: Request, env: Env): Promise<Response> {
+  const machine = await machineByCredential(env.DB, request.headers.get(MACHINE_CREDENTIAL_HEADER) ?? "");
+  if (!machine) return json({ error: "unauthorized" }, 401);
+  const name = computerName((await readJson(request)).desiredName);
+  if (name !== null && name !== machine.name) await setServerName(env.DB, machine.id, name).catch(() => {});
+  return json({ label: machine.handle });
+}
+
 async function apex(request: Request, url: URL, env: Env): Promise<Response> {
   if (request.method === "POST" && url.pathname === "/api/register") {
     return register(request, env);
+  }
+  if (request.method === "POST" && url.pathname === "/api/connect/machine-label") {
+    return machineLabel(request, env);
   }
   if (request.method === "GET" && url.pathname === "/api/phone-session") {
     const token = bearer(request);
@@ -240,9 +300,11 @@ async function apex(request: Request, url: URL, env: Env): Promise<Response> {
   }
   if (request.method === "POST" && url.pathname.startsWith("/api/")) {
     const server = await serverByCredential(env.DB, bearer(request));
-    if (!server) return json({ error: "Unknown Mac." }, 401);
+    if (!server || server.ownerServerId !== null) return json({ error: "Unknown Mac." }, 401);
     if (url.pathname === "/api/computers") return computers(request, env, server);
     if (url.pathname === "/api/computers/open") return openComputer(request, env, server);
+    if (url.pathname === "/api/machines") return addMachine(request, env, server);
+    if (url.pathname === "/api/machines/revoke") return removeMachine(request, env, server);
     if (url.pathname === "/api/phone-code") {
       const { code, expiresAt } = await createCode(env.DB, server.id, null, PHONE_CODE_TTL_MS);
       const formatted = formatCode(code);
@@ -287,6 +349,15 @@ function serverOrigin(server: Server, target: string | null, env: Env): string {
   return `https://${server.handle}${target === null ? "" : `--${target}`}.${env.BASE_DOMAIN}`;
 }
 
+/** Sends a phone to the Mac's app to get a one-time ticket for a shared port, on the Mac or one of its remote hosts. */
+function shareHop(mac: Server, port: string, returnPath: string, env: Env, machineHandle?: string): string {
+  const next = new URL(`${serverOrigin(mac, null, env)}/__share`);
+  next.searchParams.set("port", port);
+  if (machineHandle !== undefined) next.searchParams.set("machine", machineHandle);
+  next.searchParams.set("return", returnPath);
+  return next.toString();
+}
+
 async function visitor(
   request: Request,
   url: URL,
@@ -313,6 +384,26 @@ async function visitor(
     return stub.fetch(new Request(forward, request));
   }
 
+  if (server.ownerServerId === null && target === null) {
+    if (request.method === "GET" && INSTALL_PATHS.has(url.pathname)) {
+      return stub.fetch(requestForTunnelDo(request, null));
+    }
+    const presented = request.headers.get(MACHINE_CREDENTIAL_HEADER);
+    const machinePath =
+      url.pathname.startsWith("/internal") || url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/");
+    if (presented !== null) {
+      const machine = await machineByCredential(env.DB, presented);
+      if (!machine || machine.ownerServerId !== server.id || !machinePath) {
+        return text("Machine not authorized\n", 403);
+      }
+      if (isHostManagementMutation(request, url.pathname)) {
+        return text("Remote hosts cannot manage machines\n", 403);
+      }
+      return stub.fetch(requestForTunnelDo(request, null, machine.id));
+    }
+    if (url.pathname.startsWith("/internal")) return text("Not found\n", 404);
+  }
+
   if (url.pathname === "/__pair") {
     const code = normalizeCode(url.searchParams.get("code") ?? "");
     if (code === null || !(await consumeCode(env.DB, code, server.id, target))) {
@@ -328,6 +419,17 @@ async function visitor(
   const session: Session | null = token ? await sessionByToken(env.DB, token) : null;
   const signedIn = session?.serverId === server.id && session.target === target;
 
+  // A remote host's address only carries its shared ports. Phones sign in to them through the Mac they belong to.
+  if (server.ownerServerId !== null) {
+    if (target === null || url.pathname.startsWith("/__")) return text("Not found\n", 404);
+    if (!signedIn) {
+      if (request.method !== "GET" || !wantsHtml(request)) return text("Sign in required\n", 401);
+      const owner = await serverById(env.DB, server.ownerServerId);
+      if (!owner) return text("Not found\n", 404);
+      return redirect(shareHop(owner, target, url.pathname + url.search, env, server.handle));
+    }
+  }
+
   const cloudPath = CLOUD_PATH.exec(url.pathname)?.[1];
   if (cloudPath !== undefined) {
     if (!signedIn || target !== null || !token) return json({ error: "Sign in required." }, 401);
@@ -338,8 +440,16 @@ async function visitor(
     const port = url.searchParams.get("port") ?? "";
     if (target !== null || !PORT.test(port)) return text("Not found\n", 404);
     if (!signedIn) return codePage("/__pair");
-    const { code } = await createCode(env.DB, server.id, port, SHARE_CODE_TTL_MS);
-    const next = new URL(`${serverOrigin(server, port, env)}/__pair`);
+    const machineHandle = url.searchParams.get("machine");
+    const host =
+      machineHandle === null
+        ? server
+        : HANDLE.test(machineHandle)
+          ? await serverByHandle(env.DB, machineHandle, true)
+          : null;
+    if (!host || (host.id !== server.id && host.ownerServerId !== server.id)) return text("Not found\n", 404);
+    const { code } = await createCode(env.DB, host.id, port, SHARE_CODE_TTL_MS);
+    const next = new URL(`${serverOrigin(host, port, env)}/__pair`);
     next.searchParams.set("code", code);
     next.searchParams.set("return", safeReturnPath(url.searchParams.get("return")));
     return redirect(next.toString());
@@ -351,10 +461,7 @@ async function visitor(
   if (!signedIn && !publicFile) {
     if (request.method !== "GET" || !wantsHtml(request)) return text("Sign in required\n", 401);
     if (target === null) return codePage("/__pair");
-    const next = new URL(`${serverOrigin(server, null, env)}/__share`);
-    next.searchParams.set("port", target);
-    next.searchParams.set("return", url.pathname + url.search);
-    return redirect(next.toString());
+    return redirect(shareHop(server, target, url.pathname + url.search, env));
   }
 
   const doRequest = requestForTunnelDo(request, target);

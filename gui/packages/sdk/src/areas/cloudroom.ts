@@ -120,13 +120,26 @@ export interface CloudAutomation {
   new_thread?: boolean;
   /** Runs first in the thread's sandbox: no output skips the run, output goes to the agent (ADR 0246). */
   script?: string | null;
+  /** A webhook loop's secret URL (ADR 0262), only in the answer that creates it: the website keeps just its hash. */
+  url?: string;
 }
-export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean };
+export type CloudAutomationFields = { name?: string; prompt?: string; cron?: string | null; timezone?: string; run_at?: string | null; enabled?: boolean; script?: string | null; new_thread?: boolean; webhook?: true };
+/** Webhook events the website holds for one Local webhook loop on this Mac (ADR 0262). Ack the batch once its run starts. */
+export interface CloudHookBatch {
+  local: string;
+  batch: string;
+  events: { id: number; kind: string | null; body: string; received_at: string }[];
+}
 export type CloudAutomationRequest =
   | { action: "list"; thread?: string }
   | ({ action: "create"; thread: string } & CloudAutomationFields)
   | ({ action: "update"; id: string } & CloudAutomationFields)
-  | { action: "run" | "delete"; id: string };
+  | { action: "run" | "delete" | "hook"; id: string }
+  // Webhook loops (ADR 0262): a Local loop's URL, its removal, the events waiting for this Mac's loops, and their ack.
+  | { action: "hook" | "unhook"; local: string }
+  | { action: "events"; local: string[] }
+  | { action: "ack"; batches: string[] };
+export type CloudAutomationResponse = { automations?: CloudAutomation[]; automation?: CloudAutomation; ok?: boolean; url?: string; batches?: CloudHookBatch[]; recheck_ms?: number };
 
 /** A skill on this Mac. `cloud` means every new cloud thread gets it. */
 export interface CloudSkill {
@@ -205,7 +218,7 @@ export interface CloudroomArea {
   updateEnvironment(change: CloudEnvironmentChange): Promise<CloudEnvironment>;
   autoDelete(signal?: AbortSignal): Promise<{ days: AutoDeleteDays }>;
   /** Lists, creates, changes, runs, or deletes cloud automations. */
-  automations(input: CloudAutomationRequest): Promise<{ automations?: CloudAutomation[]; automation?: CloudAutomation; ok?: boolean }>;
+  automations(input: CloudAutomationRequest): Promise<CloudAutomationResponse>;
   setAutoDelete(days: AutoDeleteDays): Promise<{ days: AutoDeleteDays }>;
   /** Names of API keys and tokens set in this Mac's login shell, never their values. */
   macVariables(signal?: AbortSignal): Promise<{ names: string[] }>;
@@ -236,6 +249,7 @@ export interface CloudroomArea {
   /** `choice` runs the cloud thread on another model when the cloud cannot offer the local one. */
   teleport(threadId: string, action?: "start" | "cancel", choice?: { model: string; reasoning: string }): Promise<TeleportProgress>;
   teleportStatus(threadId: string, signal?: AbortSignal): Promise<TeleportProgress | null>;
+  teleportCheck(threadId: string, choice?: { model: string; reasoning: string }): Promise<{ model: string; reasoning: string; warnings: string[] }>;
   /** Moves a Cloud thread back to this Mac. `conflicts` counts cloud files saved under `.cloudroom/teleport/` because the local copy also changed. */
   teleportLocal(threadId: string): Promise<{ conflicts: number }>;
   /** Copies a cloud thread's branch into the Mac project without stopping its agent. */
@@ -281,7 +295,7 @@ export interface BbImportResult {
 }
 
 export interface NativeSession {
-  harness: "claude-code" | "codex" | "pi" | "acp-hermes-agent";
+  harness: "claude-code" | "codex" | "pi" | "acp-hermes-agent" | "t3code";
   id: string;
   title: string;
   cwd: string;
@@ -331,7 +345,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     environment: (signal) => transport.readJson(request("/environment", undefined, signal)) as Promise<CloudEnvironment>,
     updateEnvironment: (change) => transport.readJson(request("/environment", change)) as Promise<CloudEnvironment>,
     autoDelete: (signal) => transport.readJson(request("/auto-delete", undefined, signal)) as Promise<{ days: AutoDeleteDays }>,
-    automations: (input) => transport.readJson(request("/automations", input)) as Promise<{ automations?: CloudAutomation[]; automation?: CloudAutomation; ok?: boolean }>,
+    automations: (input) => transport.readJson(request("/automations", input)) as Promise<CloudAutomationResponse>,
     setAutoDelete: (days) => transport.readJson(request("/auto-delete", { days })) as Promise<{ days: AutoDeleteDays }>,
     macVariables: (signal) => transport.readJson(request("/environment/mac", undefined, signal)) as Promise<{ names: string[] }>,
     importMacVariables: (names) => transport.readJson(request("/environment/mac", { names })) as Promise<CloudEnvironment>,
@@ -346,6 +360,7 @@ export function createCloudroomArea({ transport }: CreateSdkAreaArgs): Cloudroom
     threadStatus: (threadId, signal) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}`, { signal })) as Promise<{ model: string; reasoning: string } | null>,
     threadWorkspace: (threadId, signal) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/workspace`, { signal })) as Promise<CloudroomThreadWorkspace | null>,
     teleport: (threadId, action = "start", choice) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/teleport`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...choice }) })) as Promise<TeleportProgress>,
+    teleportCheck: (threadId, choice) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/teleport`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "check", ...choice }) })) as Promise<{ model: string; reasoning: string; warnings: string[] }>,
     teleportStatus: (threadId, signal) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/teleport`, { signal })) as Promise<TeleportProgress | null>,
     teleportLocal: (threadId) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/teleport`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "local" }) })) as Promise<{ conflicts: number }>,
     moveToSandbox: (threadId) => transport.readJson(transport.fetch(`${transport.baseUrl}/api/v1/cloudroom/threads/${encodeURIComponent(threadId)}/teleport`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "move" }) })) as Promise<TeleportProgress>,

@@ -1,8 +1,8 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { promisify } from "node:util";
 import { gzipSync } from "node:zlib";
 import type { HostDaemonContributedEnvEntry } from "@cloudroom/host-daemon-contract";
@@ -14,7 +14,7 @@ import { hasSupportedFrontmatterDelimiter } from "../skills/injected-skills.js";
 import { macClaudeSignedIn } from "./claude-token.js";
 import { CloudroomConnectionError, CloudroomError } from "./client.js";
 import { macHarnessVersions } from "./harness-versions.js";
-import { isRemoteMcp, mcpSignInKey, needsMcpSignIn, type McpSignIn, type RemoteMcpServer } from "./mcp-login.js";
+import { cancelMcpSignIns, isRemoteMcp, mcpSignInKey, needsMcpSignIn, type McpSignIn, type RemoteMcpServer } from "./mcp-login.js";
 
 export const SANDBOX_PREFIX = "sandbox:";
 export const sandboxThread = (coreUrl: string) => coreUrl.startsWith(SANDBOX_PREFIX) ? coreUrl.slice(SANDBOX_PREFIX.length) : null;
@@ -37,6 +37,7 @@ const awakeSchema = z.object({
   recheck_ms: z.number().int().min(1_000).max(3_600_000).catch(60_000),
 });
 export type SandboxAccount = { website: string; userId: string; token: string };
+type AccountRequest = { account: SandboxAccount; signal: AbortSignal };
 export type SandboxConnection = { url: string; token: string };
 export type SandboxTrigger = "app_launch" | "app_activity" | "composer" | "thread_typing" | "thread_view";
 /** Why a sleeping thread wakes before any work is sent: the user opened it or started typing (ADR 0176). */
@@ -283,6 +284,30 @@ export async function macSkills(): Promise<MacSkill[]> {
   return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
+async function configFiles(home: string, paths: string[]): Promise<string[]> {
+  const files: string[] = [];
+  for (const path of paths) {
+    const root = await realpath(join(home, path));
+    const ancestors = new Set<string>();
+    const visit = async (path: string): Promise<void> => {
+      const full = join(home, path);
+      const target = await realpath(full).catch(() => null);
+      if (!target || (target !== root && !target.startsWith(root + sep)) || ancestors.has(target)) return;
+      const info = await stat(full);
+      if (!info.isFile() && !info.isDirectory()) return;
+      files.push(path);
+      if (!info.isDirectory()) return;
+      ancestors.add(target);
+      for (const name of await readdir(full)) {
+        if (![".git", "node_modules", ".DS_Store"].includes(name)) await visit(join(path, name));
+      }
+      ancestors.delete(target);
+    };
+    await visit(path);
+  }
+  return files;
+}
+
 export type MacMcpServer = { name: string; server: McpServer | null };
 const texts = (value: unknown) => Object.fromEntries(Object.entries(value && typeof value === "object" ? value : {}).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -357,7 +382,7 @@ export class SandboxDirectory {
   constructor(readonly account: () => Promise<SandboxAccount | null>, private readonly woke: (thread: string) => void = () => {}) {}
 
   /** `only` sends the request solely for that account, so a login started under one account never reaches another. */
-  private async call(body: Record<string, unknown>, path = "sandboxes", only?: { account: SandboxAccount; signal: AbortSignal }): Promise<unknown> {
+  private async call(body: Record<string, unknown>, path = "sandboxes", only?: AccountRequest): Promise<unknown> {
     const account = await this.account();
     if (!account) throw new CloudroomError("Sign in to Cloudroom to use cloud sandboxes.");
     if (only && (account.userId !== only.account.userId || account.website !== only.account.website)) throw new CloudroomError("The Cloudroom account changed. Try again.");
@@ -598,6 +623,11 @@ export class SandboxDirectory {
 
   /** Forgets what was learned under the last account: sandbox tokens, uploaded logins and config, and its settings. */
   reset(): void {
+    cancelMcpSignIns();
+    this.signIns = null;
+    this.mcpNames = null;
+    this.mcpAt = 0;
+    this.mcpDigest = "";
     this.views.clear();
     this.awake = new Map();
     this.awakeNext = 0;
@@ -642,7 +672,7 @@ export class SandboxDirectory {
   async remove(thread: string): Promise<void> { this.forget(thread); await this.call({ action: "remove", thread }); }
 
   /** Saves a login for every sandbox of this account (ADR 0145), skipping values already uploaded. */
-  async saveLogin(name: SandboxLogin, value: string, only?: { account: SandboxAccount; signal: AbortSignal }): Promise<void> {
+  async saveLogin(name: SandboxLogin, value: string, only?: AccountRequest): Promise<void> {
     const digest = createHash("sha256").update(value).digest("hex");
     if (this.uploaded.get(name) === digest) return;
     await this.call({ name, value }, "logins", only);
@@ -697,9 +727,9 @@ export class SandboxDirectory {
 
   /** The account's cloud MCP sign-ins: Claude Code's `mcpOAuth` records. Read from the website at most every 5 minutes. */
   private signIns: { at: number; value: Promise<Record<string, unknown>> } | null = null;
-  private cloudMcpSignIns(fresh = false): Promise<Record<string, unknown>> {
+  private cloudMcpSignIns(fresh = false, only?: AccountRequest): Promise<Record<string, unknown>> {
     if (fresh || !this.signIns || Date.now() - this.signIns.at > 5 * 60_000) {
-      const value = this.cloudLogin("mcp").then(text => {
+      const value = this.cloudLogin("mcp", only).then(text => {
         const saved = (text ? JSON.parse(text) : null) as { mcpOAuth?: unknown } | null;
         return saved?.mcpOAuth && typeof saved.mcpOAuth === "object" && !Array.isArray(saved.mcpOAuth) ? saved.mcpOAuth as Record<string, unknown> : {};
       });
@@ -720,11 +750,12 @@ export class SandboxDirectory {
     return Object.fromEntries(remote.flatMap(({ name }, i) => states[i] ? [[name, states[i]]] : []));
   }
   /** Adds a new MCP sign-in to the account's others, replacing that server's old one. Awake sandboxes get it at once. */
-  async saveMcpSignIn(name: string, server: RemoteMcpServer, signIn: McpSignIn): Promise<void> {
+  async saveMcpSignIn(name: string, server: RemoteMcpServer, signIn: McpSignIn, account: SandboxAccount): Promise<void> {
+    const only = { account, signal: AbortSignal.timeout(120_000) };
     for (let tries = 1; ; tries++) {
-      const others = Object.entries(await this.cloudMcpSignIns(true)).filter(([, saved]) => (saved as Partial<McpSignIn> | null)?.serverName !== name);
+      const others = Object.entries(await this.cloudMcpSignIns(true, only)).filter(([, saved]) => (saved as Partial<McpSignIn> | null)?.serverName !== name);
       try {
-        return await this.saveLogin("mcp", JSON.stringify({ mcpOAuth: { ...Object.fromEntries(others), [mcpSignInKey(name, server)]: signIn } }));
+        return await this.saveLogin("mcp", JSON.stringify({ mcpOAuth: { ...Object.fromEntries(others), [mcpSignInKey(name, server)]: signIn } }), only);
       } catch (error) {
         // Usually a sandbox saved its refreshed sign-ins first.
         if (tries >= 3) throw error;
@@ -804,8 +835,8 @@ export class SandboxDirectory {
     }
   }
 
-  private async cloudLogin(name: "claude" | "codex" | "mcp"): Promise<string | null> {
-    return z.object({ value: z.string().nullable() }).parse(await this.call({ action: "get", name }, "logins")).value;
+  private async cloudLogin(name: "claude" | "codex" | "mcp", only?: AccountRequest): Promise<string | null> {
+    return z.object({ value: z.string().nullable() }).parse(await this.call({ action: "get", name }, "logins", only)).value;
   }
 
   private configAt = 0;
@@ -831,10 +862,11 @@ export class SandboxDirectory {
     const home = homedir();
     const instructions = (await Promise.all(INSTRUCTION_FILES.map(path => stat(join(home, path)).then(() => path, () => null)))).filter((path): path is string => path !== null);
     const present = [...(await macSkills()).filter(skill => inCloud(skill.name)).flatMap(skill => skill.paths), ...instructions];
-    // Links are followed: sandboxes lack the targets. The digest skips file times, since Claude Code re-saves unchanged skills at every start.
-    // Nothing chosen still uploads an empty archive, so new sandboxes stop getting the old skills.
-    const tar = present.length ? (await promisify(execFile)("tar", ["-c", "-h", "--format", "ustar", "--exclude", ".git", "--exclude", "node_modules", "--exclude", ".DS_Store", "-C", home, ...present],
-      { encoding: "buffer", maxBuffer: 4 * CONFIG_LIMIT, timeout: 30_000, env: { ...process.env, COPYFILE_DISABLE: "1" } })).stdout : Buffer.alloc(1024);
+    const files = await configFiles(home, present);
+    const run = files.length ? promisify(execFile)("tar", ["-c", "-h", "--no-recursion", "--format", "ustar", "-C", home, "--null", "-T", "-"],
+      { encoding: "buffer", maxBuffer: 4 * CONFIG_LIMIT, timeout: 30_000, env: { ...process.env, COPYFILE_DISABLE: "1" } }) : null;
+    run?.child.stdin?.on("error", () => {}).end(files.join("\0") + "\0");
+    const tar = run ? (await run).stdout : Buffer.alloc(1024);
     const digest = contentDigest(tar);
     if (digest === this.configDigest) { this.configIssue = null; return; }
     const body = gzipSync(tar);

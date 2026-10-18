@@ -1,6 +1,7 @@
 import { SourceLoadingSkeleton } from "@/components/code/code-loading-skeletons";
 import {
   type CSSProperties,
+  type ReactNode,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -85,6 +86,7 @@ interface FilePreviewProps {
   onSelectionAddToChat?: (text: string) => void;
   onOpenInEditor?: (path: string) => void;
   onRevealInFinder?: (path: string) => void;
+  onDownload?: (path: string) => void;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   markdownLinkRouting?: MarkdownLinkRouting;
@@ -98,6 +100,7 @@ interface FilePreviewBodyProps {
   viewMode: FilePreviewViewMode;
   markdownLinkRouting?: MarkdownLinkRouting;
   onSelectionAddToChat?: (text: string) => void;
+  onDownload?: (path: string) => void;
 }
 
 interface HtmlFilePreviewBodyProps {
@@ -114,6 +117,7 @@ interface FilePreviewHeaderProps {
   externalUrl: string | null;
   onOpenInEditor?: (path: string) => void;
   onRevealInFinder?: (path: string) => void;
+  onDownload?: (path: string) => void;
   onRefresh?: () => void;
   isRefreshing: boolean;
   statusLabel: WorkspaceFilePreviewStatusLabel | null;
@@ -160,6 +164,7 @@ interface FilePreviewVideoProps {
 interface FilePreviewMessageProps {
   message: string;
   role?: "alert";
+  children?: ReactNode;
 }
 
 interface FilePreviewCodeProps {
@@ -425,6 +430,7 @@ export function FilePreview({
   onSelectionAddToChat,
   onOpenInEditor,
   onRevealInFinder,
+  onDownload,
   onRefresh,
   isRefreshing = false,
   markdownLinkRouting,
@@ -489,6 +495,7 @@ export function FilePreview({
           externalUrl={externalUrl}
           onOpenInEditor={onOpenInEditor}
           onRevealInFinder={onRevealInFinder}
+          onDownload={onDownload}
           onRefresh={onRefresh}
           isRefreshing={isRefreshing}
           statusLabel={statusLabel}
@@ -507,6 +514,7 @@ export function FilePreview({
         viewMode={bodyViewMode}
         markdownLinkRouting={markdownLinkRouting}
         onSelectionAddToChat={onSelectionAddToChat}
+        onDownload={onDownload}
       />
     </div>
   );
@@ -519,6 +527,7 @@ function FilePreviewBody({
   viewMode,
   markdownLinkRouting,
   onSelectionAddToChat,
+  onDownload,
 }: FilePreviewBodyProps) {
   if (state.kind === "loading") {
     return <SourceLoadingSkeleton />;
@@ -534,7 +543,20 @@ function FilePreviewBody({
       <FilePreviewMessage
         message={state.message ?? "Failed to load file"}
         role={state.message === undefined ? "alert" : undefined}
-      />
+      >
+        {onDownload ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3"
+            onClick={() => onDownload(path)}
+          >
+            <Icon name="Download" aria-hidden />
+            Save to Downloads
+          </Button>
+        ) : null}
+      </FilePreviewMessage>
     );
   }
   if (state.kind === "image") {
@@ -597,6 +619,7 @@ function FilePreviewHeader({
   externalUrl,
   onOpenInEditor,
   onRevealInFinder,
+  onDownload,
   onRefresh,
   isRefreshing,
   statusLabel,
@@ -726,6 +749,26 @@ function FilePreviewHeader({
                 </Tooltip>
                 <AppCommandShortcutHint shortcut={openShortcut} />
               </>
+            ) : null}
+            {onDownload ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className={cn(
+                      FILE_PREVIEW_HEADER_ICON_BUTTON_CLASS,
+                      "shrink-0 text-muted-foreground hover:bg-state-hover hover:text-foreground",
+                    )}
+                    onClick={() => onDownload(path)}
+                    aria-label="Save to Downloads"
+                  >
+                    <Icon name="Download" aria-hidden />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Save to Downloads</TooltipContent>
+              </Tooltip>
             ) : null}
             {onRevealInFinder && copyPath ? (
               <Tooltip>
@@ -1159,10 +1202,15 @@ function IframeFilePreview({ sandbox, title, url }: IframeFilePreviewTarget) {
   );
 }
 
-function FilePreviewMessage({ message, role }: FilePreviewMessageProps) {
+function FilePreviewMessage({
+  message,
+  role,
+  children,
+}: FilePreviewMessageProps) {
   return (
     <EmptyStatePanel role={role} className="mx-4 mt-4 rounded-lg">
       {message}
+      {children ? <div>{children}</div> : null}
     </EmptyStatePanel>
   );
 }

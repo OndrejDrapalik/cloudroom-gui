@@ -130,15 +130,23 @@ function buildTrigger(args: ParsedArgs): CreateAutomationInput["trigger"] {
   const cron = flag(args, "cron");
   const at = flag(args, "at");
   const runIn = flag(args, "in");
+  const webhook = boolFlag(args, "webhook");
   const triggerFlags = [
     cron !== undefined,
     at !== undefined,
     runIn !== undefined,
+    webhook,
   ].filter(Boolean).length;
   if (triggerFlags !== 1) {
     throw new Error(
-      "Provide exactly one schedule flag: --cron, --at, or --in.",
+      "Provide exactly one trigger flag: --cron, --at, --in, or --webhook.",
     );
+  }
+  if (webhook) {
+    if (flag(args, "timezone") !== undefined) {
+      throw new Error("--timezone is only used with --cron.");
+    }
+    return { triggerType: "webhook" };
   }
   if (cron !== undefined) {
     const timezone = flag(args, "timezone");
@@ -151,7 +159,9 @@ function buildTrigger(args: ParsedArgs): CreateAutomationInput["trigger"] {
   if (at !== undefined) return { triggerType: "once", runAt: parseRunAt(at) };
   if (runIn !== undefined)
     return { triggerType: "once", runAt: parseRunIn(runIn) };
-  throw new Error("Provide exactly one schedule flag: --cron, --at, or --in.");
+  throw new Error(
+    "Provide exactly one trigger flag: --cron, --at, --in, or --webhook.",
+  );
 }
 
 function parsePermissionMode(
@@ -678,6 +688,7 @@ function formatTimestamp(value: number | null): string {
 }
 
 function formatAutomationTrigger(automation: AutomationResponse): string {
+  if (automation.trigger.triggerType === "webhook") return "on webhook";
   if (automation.trigger.triggerType === "once") {
     return `once at ${formatTimestamp(automation.trigger.runAt)}`;
   }
@@ -863,7 +874,7 @@ function helpText(): string {
   return `Loop commands (room-cli loop is the same command)
 
 room-cli automation list --project <id>
-room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] | --script <inline> | --script-file <path> [--host <name-or-id>])
+room-cli automation create --project <id> --name <name> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) (--prompt <text> --provider <id> --model <model> [--reasoning <level>] [--service-tier default|fast] | --script <inline> | --script-file <path> [--host <name-or-id>])
 room-cli automation show <automationId> --project <id>
 room-cli automation update <automationId> --project <id> [--name <name>] [schedule flags] [complete agent/script execution flags | --provider <id> --model <model> --reasoning <level> --service-tier default|fast|none] [--target-thread <id> | --environment <id-or-path> | --new-environment worktree] (target is kept unless one is given)
 room-cli automation pause <automationId> --project <id>
@@ -871,6 +882,7 @@ room-cli automation resume <automationId> --project <id>
 room-cli automation run <automationId> --project <id> [--idempotency-key <key>]
 room-cli automation runs <automationId> --project <id> [--limit <count>] [--output <runId>]
 room-cli automation delete <automationId> --project <id> --yes
+room-cli automation hook <automationId> --project <id>   Replace a webhook loop's secret URL
 room-cli automation review [--all]                List what loops did in the last 7 days (threads they started, script output, failures)
 room-cli automation review mark <itemId...> [--undo]
 
@@ -881,9 +893,12 @@ A one-time --at/--in run re-prompts the thread; --new-thread gives it a fresh on
 A fresh-thread loop saves the thread's settings, so it keeps running after that thread is archived.
 A --script/--script-file runs first (60 s), in the loop's own sandbox with fresh threads, else in the thread's:
 no output skips the run, output is added to the prompt.
-room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration>) [--new-thread | --same-thread] [--script <inline> | --script-file <path>]
+A --webhook loop, Local or Cloud, runs when its secret URL gets a POST: create prints the URL once, and each run gets
+the requests that arrived as data. Cloud runs start within seconds; this Mac checks for Local ones about once a minute,
+and they wait while it is off. A Local webhook loop an agent creates starts paused: a person turns it on in Loops.
+room-cli automation create --cloud --thread <cloudThreadId> --name <name> --prompt <text> (--cron <expr> --timezone <tz> | --at <datetime> | --in <duration> | --webhook) [--new-thread | --same-thread] [--script <inline> | --script-file <path>]
 room-cli automation list --cloud [--thread <cloudThreadId>]
-room-cli automation show|pause|resume|run <cloudAutomationId>
+room-cli automation show|pause|resume|run|hook <cloudAutomationId>
 room-cli automation update <cloudAutomationId> [--name <name>] [--prompt <text>] [schedule flags] [--script <inline> | --script-file <path> | --no-script]
 room-cli automation delete <cloudAutomationId> --yes
 `;
@@ -901,16 +916,23 @@ function isCloudCommand(args: ParsedArgs): boolean {
 function cloudSchedule(args: ParsedArgs): { cron: string | null; timezone?: string; run_at: string | null } | null {
   if (!["cron", "at", "in"].some((name) => args.flags.has(name))) return null;
   const trigger = buildTrigger(args);
+  if (trigger.triggerType === "webhook") throw new Error("A webhook loop has no schedule.");
   return trigger.triggerType === "schedule"
     ? { cron: trigger.cron, timezone: trigger.timezone, run_at: null }
     : { cron: null, run_at: new Date(trigger.runAt).toISOString() };
 }
 
 function printCloudAutomation(a: CloudAutomation): string {
-  const schedule = a.cron ? `${a.cron} (${a.timezone})` : `once at ${a.run_at}`;
-  const state = a.enabled ? `next run ${a.next_run_at ?? "within a minute"}` : "paused";
+  const webhook = !a.cron && !a.run_at;
+  const schedule = a.cron ? `${a.cron} (${a.timezone})` : webhook ? "on webhook" : `once at ${a.run_at}`;
+  const state = !a.enabled ? "paused" : webhook ? (a.next_run_at ? "running its webhooks" : "waiting for a webhook") : `next run ${a.next_run_at ?? "within a minute"}`;
   const mode = `${a.new_thread ? "new thread per run" : "re-prompts"}${a.script ? " · script" : ""}`;
-  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n`;
+  return `${a.id}  ${a.name}\n  Cloud thread ${a.thread_id} · ${mode} · ${schedule} · ${state} · ${a.runs} runs${a.last_error ? `\n  Last error: ${a.last_error}` : ""}\n${a.url ? webhookNote(a.url) : ""}`;
+}
+
+/** A webhook loop's URL, printed only when it is created or replaced. */
+function webhookNote(url: string): string {
+  return `\n  Webhook URL: ${url}\n  POST anything to it to run the loop; the request reaches the agent as data. This URL is shown only now:\n  \`room-cli loop hook ID\` replaces it. Keep it secret: anyone with it can start this loop.\n`;
 }
 
 /** The script a cloud automation runs first, from --script or a --script-file read on this Mac; null for --no-script. */
@@ -951,8 +973,8 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
     }
     const thread = flag(args, "thread") ?? ctx.threadId;
     if (!thread) throw new Error("Missing required option --thread <cloudThreadId>.");
-    const schedule = cloudSchedule(args);
-    if (!schedule) throw new Error("Provide exactly one schedule flag: --cron, --at, or --in.");
+    const schedule = boolFlag(args, "webhook") && buildTrigger(args).triggerType === "webhook" ? { webhook: true as const } : cloudSchedule(args);
+    if (!schedule) throw new Error("Provide exactly one trigger flag: --cron, --at, --in, or --webhook.");
     return one({ action: "create", thread, name: requireFlag(args, "name"), prompt: requireFlag(args, "prompt"), ...schedule, enabled: !boolFlag(args, "disabled"),
       ...(boolFlag(args, "new-thread") ? { new_thread: true } : boolFlag(args, "same-thread") ? { new_thread: false } : {}), ...await cloudScript(bb, args, ctx) }, "created");
   }
@@ -962,6 +984,11 @@ async function runCloudCommand(bb: Pick<BbPluginApi, "sdk">, args: ParsedArgs, c
   }
   if (args.command === "pause" || args.command === "resume") return one({ action: "update", id: requireId(), enabled: args.command === "resume" }, args.command === "pause" ? "paused" : "resumed");
   if (args.command === "run") return one({ action: "run", id: requireId() }, "will run within a minute");
+  if (args.command === "hook") {
+    const { url } = await cloud.automations({ action: "hook", id: requireId() });
+    if (!url) throw new Error("The website returned no webhook URL.");
+    return { exitCode: 0, stdout: optionalJson(args, { id, url }) ?? `New URL for cloud loop ${id}; the old one no longer works.\n${webhookNote(url)}` };
+  }
   if (args.command === "delete") {
     if (!boolFlag(args, "yes")) throw new Error("Deletion requires --yes when run through the plugin CLI.");
     await cloud.automations({ action: "delete", id: requireId() });
@@ -1060,6 +1087,11 @@ export function registerAutomationCli(args: {
           "room-cli automation run <automationId> --project <id> [--idempotency-key <key>] [--json]",
       },
       {
+        name: "hook",
+        summary: "Replace a webhook loop's secret URL",
+        usage: "room-cli automation hook <automationId> --project <id> [--json]",
+      },
+      {
         name: "runs",
         summary: "List loop runs",
         usage:
@@ -1119,11 +1151,17 @@ export function registerAutomationCli(args: {
           };
           const created = await service.create(request);
           const json = optionalJson(parsed, created);
+          const paused =
+            created.trigger.triggerType === "webhook" &&
+            !created.enabled &&
+            request.enabled
+              ? "  It starts paused, because an agent made it: a person turns it on in the Loops panel.\n"
+              : "";
           return {
             exitCode: 0,
             stdout:
               json ??
-              `Loop created: ${created.id}\n${printAutomation(created)}${printScriptFileSnapshotNote(created, scriptSource)}`,
+              `Loop created: ${created.id}\n${printAutomation(created)}${created.webhookUrl ? webhookNote(created.webhookUrl) : ""}${paused}${printScriptFileSnapshotNote(created, scriptSource)}`,
           };
         }
         if (command === "show") {
@@ -1166,6 +1204,15 @@ export function registerAutomationCli(args: {
             projectId: requireFlag(parsed, "project"),
             automationId,
           };
+          // Anyone with a Local webhook loop's URL can prompt an agent on this Mac, so a person turns it on (ADR 0260).
+          if (command === "resume" && ctx.threadId) {
+            const found = await service.get(input);
+            if ("trigger" in found && found.trigger.triggerType === "webhook") {
+              throw new Error(
+                "A person must turn on a Local webhook loop in the Loops panel. Ask the user to.",
+              );
+            }
+          }
           const updated =
             command === "pause" ? service.pause(input) : service.resume(input);
           const json = optionalJson(parsed, updated);
@@ -1193,6 +1240,21 @@ export function registerAutomationCli(args: {
           return {
             exitCode: 0,
             stdout: json ?? `Run started: ${result.run.id}\n${threadLine}`,
+          };
+        }
+        if (command === "hook") {
+          const automationId = parsed.positionals[0];
+          if (!automationId) throw new Error("Missing automationId.");
+          const updated = await service.newWebhookUrl({
+            projectId: requireFlag(parsed, "project"),
+            automationId,
+          });
+          const json = optionalJson(parsed, updated);
+          return {
+            exitCode: 0,
+            stdout:
+              json ??
+              `New URL for loop ${updated.id}; the old one no longer works.\n${webhookNote(updated.webhookUrl!)}`,
           };
         }
         if (command === "runs") {

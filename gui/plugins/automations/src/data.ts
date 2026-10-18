@@ -45,7 +45,7 @@ export interface AutomationRow {
   targetThreadId: string | null;
   name: string;
   enabled: boolean;
-  triggerType: "schedule" | "once";
+  triggerType: AutomationTrigger["triggerType"];
   triggerConfig: string;
   runMode: AutomationRunMode;
   execution: string;
@@ -501,6 +501,21 @@ export function listAutomationsForProject(
     .map(requiredAutomationRow);
 }
 
+/** Enabled webhook loops: the ones whose events this Mac asks the website for (src/hooks.ts). */
+export function listEnabledWebhookAutomations(db: Db): AutomationRow[] {
+  return db
+    .prepare(
+      `SELECT
+         ${AUTOMATION_COLUMNS}
+       FROM automations
+       WHERE enabled = 1 AND trigger_type = 'webhook'
+       ORDER BY created_at, id
+       LIMIT 100`,
+    )
+    .all()
+    .map(requiredAutomationRow);
+}
+
 export function listAllAutomations(db: Db): AutomationRow[] {
   return db
     .prepare(
@@ -889,6 +904,7 @@ export function createManualRun(
     automationId: string;
     runMode: AutomationRunMode;
     idempotencyKey?: string | null;
+    trigger?: Exclude<AutomationRunTrigger, "schedule">;
     now: number;
   },
 ): { run: AutomationRunRow; deduped: boolean } {
@@ -915,13 +931,14 @@ export function createManualRun(
          error, output, exit_code, idempotency_key, scheduled_for, started_at,
          finished_at
        ) VALUES (
-         @id, @automationId, @runMode, NULL, 'running', 'manual', NULL,
+         @id, @automationId, @runMode, NULL, 'running', @trigger, NULL,
          NULL, NULL, NULL, @idempotencyKey, @now, @now, NULL
        )`,
     ).run({
       id: runId,
       automationId: args.automationId,
       runMode: args.runMode,
+      trigger: args.trigger ?? "manual",
       idempotencyKey: args.idempotencyKey ?? null,
       now: args.now,
     });
@@ -931,7 +948,26 @@ export function createManualRun(
   })();
 }
 
-function getAutomationRun(db: Db, id: string): AutomationRunRow | null {
+/** Every attempt at one webhook batch: its runs keyed `key`, `key:2`, `key:3`, ... */
+export function listWebhookAttempts(
+  db: Db,
+  automationId: string,
+  key: string,
+): AutomationRunRow[] {
+  return db
+    .prepare(
+      `SELECT
+         ${AUTOMATION_RUN_COLUMNS}
+       FROM automation_runs
+       WHERE automation_id = ?
+         AND (idempotency_key = ? OR idempotency_key GLOB ? || ':*')
+       ORDER BY started_at`,
+    )
+    .all(automationId, key, key)
+    .map(requiredRunRow);
+}
+
+export function getAutomationRun(db: Db, id: string): AutomationRunRow | null {
   return optionalRunRow(
     db
       .prepare(

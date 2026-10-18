@@ -475,6 +475,12 @@ export async function sendThreadMessage(
 ): Promise<void> {
   if (teleportBlocked(deps.db, args.thread.id) || getThread(deps.db, args.thread.id)?.executionTarget === "cloud") throw new ApiError(409, "teleport_in_progress", "Local execution is blocked during or after Teleport.");
   if (isStandaloneBuiltinClearCommand(args.payload.input)) {
+    // A queued /clear must consume its row like any message, or the stale-claim
+    // sweep frees it and it clears the thread again every few minutes.
+    const consumeQueuedRow = args.beforeAppendInTransaction;
+    if (consumeQueuedRow) {
+      deps.db.transaction((tx) => consumeQueuedRow({ tx }), { behavior: "immediate" });
+    }
     await clearThreadContext(deps, {
       environment: args.environment,
       thread: args.thread,

@@ -2291,8 +2291,8 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
   const handleOpenHostFileInEditor = useMemo<
     OpenInEditorHandler | undefined
   >(() => {
-    if (isCloudThread) return (path) => openCloudFile(path);
-    if (!canOpenPreferredFileTarget) {
+    // Cloud files are not on this computer; Save to Downloads copies them here instead.
+    if (isCloudThread || !canOpenPreferredFileTarget) {
       return undefined;
     }
     return (path) => {
@@ -2307,7 +2307,6 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
     activeHostFileLineRange,
     canOpenPreferredFileTarget,
     isCloudThread,
-    openCloudFile,
     openPathInPreferredFileTarget,
   ]);
   const handleRevealInFinder =
@@ -2782,6 +2781,7 @@ function ThreadDetailViewInternal(props: ThreadRoutePathArgs) {
             })}
             onOpenInEditor={handleOpenHostFileInEditor}
             onRevealInFinder={handleRevealInFinder}
+            onDownload={isCloudThread ? openCloudFile : undefined}
             onSelectionAddToChat={handleSelectionAddToChat}
             threadId={thread.id}
           />

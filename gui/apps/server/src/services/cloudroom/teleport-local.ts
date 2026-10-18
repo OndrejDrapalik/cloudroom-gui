@@ -43,7 +43,7 @@ const VM_SESSIONS: Record<Harness, string> = {
 };
 const CHUNK = 8 * 1024 * 1024;
 const PREVIEW_MB = 20;
-const VIEWABLE = /\.(png|jpe?g|gif|webp|heic|svg|pdf|zip|txt|md|csv|json|mp4|mov|mp3|wav)$/i;
+const DOWNLOAD_MB = 200;
 const exec = promisify(execFile);
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 // Cloud files must never land in a .git folder, where Git runs hooks and config commands on the Mac.
@@ -175,10 +175,11 @@ export async function copyToMac(deps: AppDeps, threadId: string): Promise<{ bran
   }
 }
 
+/** Save to Downloads: copies a cloud file into ~/Downloads under a free name and shows it, never opens it. */
 export async function openOnMac(deps: AppDeps, threadId: string, path: string): Promise<{ path: string }> {
   if (getThread(deps.db, threadId)?.executionTarget !== "cloud")
     throw new ApiError(409, "open_unavailable", "Only cloud threads have cloud files.");
-  const data = await download(await cloudroom(deps).threadClient(threadId), path);
+  const data = await download(await cloudroom(deps).threadClient(threadId), path, DOWNLOAD_MB);
   const folder = join(homedir(), "Downloads");
   await mkdir(folder, { recursive: true });
   const name = basename(path);
@@ -186,8 +187,8 @@ export async function openOnMac(deps: AppDeps, threadId: string, path: string): 
   let target = join(folder, name);
   for (let copy = 2; existsSync(target); copy++) target = join(folder, `${stem} ${copy}${extname(name)}`);
   await writeFile(target, data, { flag: "wx" });
-  if (process.platform === "linux") spawn("xdg-open", [VIEWABLE.test(target) ? target : folder], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
-  else await exec("open", VIEWABLE.test(target) ? [target] : ["-R", target]);
+  if (process.platform === "linux") spawn("xdg-open", [folder], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+  else await exec("open", ["-R", target]);
   return { path: target };
 }
 
@@ -292,7 +293,7 @@ else: sys.exit("This forked Codex chat has too many parents.")`;
 export async function download(client: CloudroomClient, path: string, maxMb = Infinity): Promise<Buffer> {
   const size = Number((await vm(client, `[ -f ${quote(path)} ] && wc -c < ${quote(path)} || echo -1`)).toString().trim());
   if (size < 0) throw new ApiError(404, "cloud_file_missing", `${path} is not a file in the cloud.`);
-  if (size > maxMb * 1024 * 1024) throw new ApiError(413, "cloud_file_too_large", `${basename(path)} is over ${maxMb} MB, too big to preview. Use Open in editor to download it.`);
+  if (size > maxMb * 1024 * 1024) throw new ApiError(413, "cloud_file_too_large", `${basename(path)} is over the ${maxMb} MB limit.`);
   const parts: Buffer[] = [];
   for (let offset = 0; offset < size; offset += CHUNK)
     parts.push(await vm(client, `tail -c +${offset + 1} ${quote(path)} | head -c ${CHUNK}`));

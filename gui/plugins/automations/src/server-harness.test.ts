@@ -32,6 +32,7 @@ const rpcMethods = [
   "automations_pause",
   "automations_resume",
   "automations_run",
+  "automations_new_webhook_url",
   "automations_runs",
   "automations_review",
   "automations_review_mark",
@@ -188,7 +189,7 @@ describe("automations server plugin harness", () => {
     expect(harness.registrations.cli?.name).toBe("automation");
     expect(
       harness.registrations.services.map((service) => service.name),
-    ).toEqual(["automation-sweep"]);
+    ).toEqual(["automation-sweep", "automation-webhooks"]);
     expect(harness.registrations.threadEventHandlers).toMatchObject({
       "thread.idle": 1,
       "thread.failed": 1,

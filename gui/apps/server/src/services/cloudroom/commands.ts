@@ -113,6 +113,8 @@ const capabilitiesSchema = z.object({
     attachments: z.object({ images: z.boolean(), files: z.boolean() }).optional(),
     subagents: z.boolean().default(false),
     usage: z.boolean().default(false),
+    /** fx switches effort per turn; other ACP harnesses keep the launch level. */
+    prompt_reasoning: z.boolean().default(false),
   })),
 });
 type Connection = z.infer<typeof connectionSchema>;
@@ -249,8 +251,9 @@ function followUpPayload(harness: string, saved: Binding, payload: SendMessageRe
 
 function validateFollowUpReasoning(harness: string, saved: Binding, reasoning: string, capabilities: Capabilities): void {
   if (reasoning === saved.reasoning) return;
-  if (isAcpProvider(harness)) throw new ApiError(409, "cloudroom_launch_settings", `${HARNESS_NAMES[harness]} reasoning is fixed for this cloud session. Start a new thread to change it.`);
-  if (harness !== "codex" && harness !== "pi" && harness !== "claude-code") throw new ApiError(400, "cloudroom_harness", "Unsupported cloud harness.");
+  if (isAcpProvider(harness)) {
+    if (!harnessProfile(capabilities, harness)?.prompt_reasoning) throw new ApiError(409, "cloudroom_launch_settings", `${HARNESS_NAMES[harness]} reasoning is fixed for this cloud session. Start a new thread to change it.`);
+  } else if (harness !== "codex" && harness !== "pi" && harness !== "claude-code") throw new ApiError(400, "cloudroom_harness", "Unsupported cloud harness.");
   if (!capabilities.prompt_reasoning) throw new ApiError(409, "cloudroom_update", "Update the cloud core before changing reasoning on a follow-up.");
   validateReasoning(harness, coreModel(harness, saved.model, capabilities).model, reasoning, capabilities);
 }
@@ -1932,7 +1935,9 @@ class CloudroomService {
         this.progress(threadId, [{ key: "agent", status: "completed" }, ...files, ...forkCode], "completed");
         const firstSent = new Promise<void>(resolve => { releaseCopy = resolve; });
         // `room-cli files wait` holds the agent until the files, and a fork's code, have landed (ADR 0209).
-        const workspace = options.workspace && options.workspace !== ROOT_WORKSPACE && (files.length || started.code) ? options.workspace : null;
+        // A child in a Personal project has no workspace of its own, so its status file sits next to the sandbox root.
+        const workspace = options.workspace && options.workspace !== ROOT_WORKSPACE && (files.length || started.code) ? options.workspace
+          : started.code ? await client.sessionWorkspace(started.sessionId).then(({ path }) => path, () => null) : null;
         // Code from another thread replaces the folder's files, so the agent must wait for it from its first command.
         const marked = workspace ? started.code ? this.filesState(client, threadId, workspace, "copying") : firstSent.then(() => this.filesState(client, threadId, workspace, "copying")) : null;
         if (started.code) await marked;
@@ -1948,7 +1953,10 @@ class CloudroomService {
             return;
           }
           // A fork's branch then moves to its source's code, so the agent sees what the source saw.
-          void this.ensureBranch(threadId, true).then(() => landForkCode(client, started)).then((failure) => {
+          void this.ensureBranch(threadId, true).then(() => landForkCode(client, started)).then(async (failure) => {
+            // A child folder with no Git gets its repository only now, on a cloudroom/ branch: rename it to its room/ one
+            // before the agent goes on.
+            if (!failure) await this.ensureBranch(threadId, false);
             this.progress(threadId, [{ key: "fork", status: failure ? "failed" : "completed" }]);
             finish(failure ?? missing);
           });

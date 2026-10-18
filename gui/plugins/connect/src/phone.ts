@@ -47,11 +47,11 @@ export class PhoneRelay {
   }
 
   phoneCode(): Promise<PhoneCode> {
-    return this.call<PhoneCode>("/api/phone-code");
+    return this.call("/api/phone-code") as Promise<PhoneCode>;
   }
 
   signOutPhones(): Promise<{ revoked: number }> {
-    return this.call<{ revoked: number }>("/api/phone-sessions/revoke");
+    return this.call("/api/phone-sessions/revoke") as Promise<{ revoked: number }>;
   }
 
   private async reconcile(force: boolean): Promise<void> {
@@ -74,7 +74,7 @@ export class PhoneRelay {
     });
   }
 
-  private async call<T>(path: string): Promise<T> {
+  async call(path: string, body?: unknown): Promise<unknown> {
     const credential = this.tunnel.getCredential();
     if (credential === null) {
       throw new Error(
@@ -87,7 +87,11 @@ export class PhoneRelay {
       new URL(path, deriveConnectBaseUrl(credential.serverUrl)),
       {
         method: "POST",
-        headers: { authorization: `Bearer ${credential.credential}` },
+        headers: {
+          authorization: `Bearer ${credential.credential}`,
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: AbortSignal.timeout(10_000),
       },
     );
@@ -98,6 +102,6 @@ export class PhoneRelay {
     if (!response.ok) {
       throw new Error(`Cloudroom Connect returned HTTP ${response.status}.`);
     }
-    return (await response.json()) as T;
+    return response.json();
   }
 }

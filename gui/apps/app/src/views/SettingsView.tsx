@@ -662,6 +662,7 @@ const WORKTREE_RETENTION_LABELS: Record<WorktreeRetention, string> = {
   "1h": "1 hour",
   "1d": "1 day",
   "7d": "7 days",
+  "21d": "21 days",
   "30d": "30 days",
   never: "Never",
 };

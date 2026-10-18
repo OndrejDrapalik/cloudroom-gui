@@ -10,8 +10,3 @@ export function connectPublicProtocol(
 export function deriveConnectBaseUrl(serverUrl: string): string {
   return new URL(serverUrl).origin.replace(/\/\/[^.]+\./, "//");
 }
-
-export function serverUrlForHandle(baseUrl: string, handle: string): string {
-  const url = new URL(baseUrl);
-  return `${url.protocol}//${handle}.${url.host}`;
-}

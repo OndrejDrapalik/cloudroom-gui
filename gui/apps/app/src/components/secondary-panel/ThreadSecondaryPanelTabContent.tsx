@@ -98,6 +98,7 @@ interface HostFilePreviewTabContentProps {
   onSelectionAddToChat?: (text: string) => void;
   onOpenInEditor?: (path: string) => void;
   onRevealInFinder?: (path: string) => void;
+  onDownload?: (path: string) => void;
   threadId: string;
 }
 
@@ -471,6 +472,7 @@ export function HostFilePreviewTabContent({
   onSelectionAddToChat,
   onOpenInEditor,
   onRevealInFinder,
+  onDownload,
   threadId,
 }: HostFilePreviewTabContentProps) {
   const hostFilePreviewQuery = useThreadHostFilePreview(
@@ -503,6 +505,7 @@ export function HostFilePreviewTabContent({
       onSelectionAddToChat={onSelectionAddToChat}
       onOpenInEditor={onOpenInEditor}
       onRevealInFinder={onRevealInFinder}
+      onDownload={onDownload}
       statusLabel={null}
     />
   );

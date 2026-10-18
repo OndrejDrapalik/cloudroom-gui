@@ -124,6 +124,8 @@ worktree it made and removes the ones nothing is using:
 - Archiving the last thread starts a five-minute grace period. Unarchive a
   thread within it and the worktree is kept; let it elapse and the worktree
   goes.
+- Teleporting the last thread to Cloud shortens the wait to 2 days, or to the
+  retention setting if that is shorter. "Never" still keeps it.
 
 Removal runs `.bb-env-teardown.sh` inside the worktree first, then stops
 every process whose working directory is inside the worktree — the agent's

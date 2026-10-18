@@ -38,8 +38,16 @@ import { Input } from "@cloudroom/shared-ui/input";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import { Button } from "@cloudroom/shared-ui/button";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@cloudroom/shared-ui/dropdown-menu";
+import {
   type AutomationStatusFilter,
   formatAutomationTrigger,
+  isCloudWebhook,
   formatOverviewScheduleMetadata,
   formatScheduleRunTime,
   formatScheduleStatusLabel,
@@ -65,6 +73,35 @@ const AUTOMATION_STATUS_FILTER_OPTIONS = [
 ] as const;
 
 export const CREATE_AUTOMATION_PROMPT = "Create a new Cloudroom loop to ";
+// The New button's menu (ADR 0262, design 1): pick the trigger, then finish the sentence in chat.
+const NEW_LOOP_OPTIONS = [
+  {
+    label: "On a schedule",
+    description: "Every hour, every weekday at 9…",
+    icon: "TimeSchedule",
+    prompt: "Create a new Cloudroom loop that runs on a schedule to ",
+  },
+  {
+    label: "Once",
+    description: "At a time, or in 30 minutes",
+    icon: "Calendar",
+    prompt: "Create a new Cloudroom loop that runs once to ",
+  },
+  {
+    label: "On a webhook",
+    description: "Runs when a URL gets a POST",
+    icon: "Link",
+    prompt: "Create a new Cloudroom loop that runs on a webhook to ",
+    isNew: true,
+  },
+  {
+    label: "Describe it in chat",
+    description: "An agent sets it up for you",
+    icon: "SideChat",
+    prompt: CREATE_AUTOMATION_PROMPT,
+    divider: true,
+  },
+] as const;
 export const AUTOMATION_CREATE_TEMPLATES = [
   {
     label: "CI failure triage",
@@ -646,19 +683,23 @@ export function CloudAutomationRow({
       }
       needsYou={needsYou}
       schedule={
-        automation.cron === null
-          ? "One time"
-          : formatAutomationTrigger({
-              triggerType: "schedule",
-              cron: automation.cron,
-              timezone: automation.timezone,
-            })
+        isCloudWebhook(automation)
+          ? "On webhook"
+          : automation.cron === null
+            ? "One time"
+            : formatAutomationTrigger({
+                triggerType: "schedule",
+                cron: automation.cron,
+                timezone: automation.timezone,
+              })
       }
       nextRun={
         !automation.enabled
           ? "Paused"
           : nextRunAt === null
-            ? "Starts soon"
+            ? isCloudWebhook(automation)
+              ? "Waits for a webhook"
+              : "Starts soon"
             : formatTimeUntil(nextRunAt, now)
       }
       nextRunAt={nextRunAt}
@@ -668,11 +709,19 @@ export function CloudAutomationRow({
       onOpen={() => actions.onOpen(automation)}
       actions={
         <>
-          <ResourceActionButton
-            label="Run now"
-            icon="Play"
-            onClick={() => actions.onRun(automation)}
-          />
+          {isCloudWebhook(automation) ? (
+            <ResourceActionButton
+              label="New webhook URL"
+              icon="Link"
+              onClick={() => actions.onNewUrl(automation)}
+            />
+          ) : (
+            <ResourceActionButton
+              label="Run now"
+              icon="Play"
+              onClick={() => actions.onRun(automation)}
+            />
+          )}
           <ResourceActionButton
             label="Delete"
             icon="Trash2"
@@ -827,6 +876,54 @@ function cloudNextRunAt(automation: CloudAutomation): number | null {
   return automation.next_run_at === null
     ? null
     : Date.parse(automation.next_run_at);
+}
+
+function NewLoopMenu({
+  onCreateViaChat,
+}: {
+  onCreateViaChat: (prompt?: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          aria-label="New loop"
+          className="ml-1 h-8 gap-1.5 px-2.5"
+        >
+          <Icon name="Plus" className="size-3.5" aria-hidden />
+          New
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        {NEW_LOOP_OPTIONS.map((option) => (
+          <Fragment key={option.label}>
+            {"divider" in option ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem
+              className="items-start gap-2.5 py-2"
+              onSelect={() => onCreateViaChat(option.prompt)}
+            >
+              <Icon name={option.icon} className="mt-0.5 size-4" aria-hidden />
+              <span className="flex min-w-0 flex-col">
+                <span className="flex items-center gap-1.5">
+                  {option.label}
+                  {"isNew" in option ? (
+                    <span className="rounded-sm bg-primary px-1 text-[10px] font-semibold leading-4 text-primary-foreground">
+                      New
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {option.description}
+                </span>
+              </span>
+            </DropdownMenuItem>
+          </Fragment>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export function AutomationOverviewView({
@@ -1315,16 +1412,7 @@ export function AutomationOverviewView({
               }
             />
           ) : null}
-          <Button
-            type="button"
-            size="sm"
-            aria-label="New loop"
-            className="ml-1 h-8 gap-1.5 px-2.5"
-            onClick={() => onCreateViaChat()}
-          >
-            <Icon name="Plus" className="size-3.5" aria-hidden />
-            New
-          </Button>
+          <NewLoopMenu onCreateViaChat={onCreateViaChat} />
         </>
       }
     >

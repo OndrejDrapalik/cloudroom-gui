@@ -36,7 +36,8 @@ and is never copied. Every Local and Cloud thread uses the account in use, and
 added, the machine's own login needs **Add Terminal login** before it can be
 picked. Codex accounts need a Cloudroom sign-in: cloudroom.dev keeps and renews
 them, and this machine gets only access tokens.
-Claude Code receives the account through `CLAUDE_CODE_OAUTH_TOKEN`; Codex signs its
+Claude Code runs on the account's own Claude folder (`CLAUDE_CONFIG_DIR`), with a full
+login and shared history, and Cloud gets its one-year token; Codex signs its
 app server in memory through `chatgptAuthTokens`, so `~/.codex` stays untouched.
 The sidebar usage box's account chip switches accounts. Plugin RPCs:
 `accounts.list`, `accounts.use`, `accounts.move`, `accounts.remove`,

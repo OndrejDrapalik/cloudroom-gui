@@ -82,8 +82,8 @@ export function registerImportCommands(program: Command, getUrl: () => string): 
       for (const thread of result.skipped) console.log(`Skipped   ${thread.title}: ${thread.reason}`);
       if (!result.imported.length && !result.skipped.length) console.log("No open BB threads found.");
     }));
-  for (const [command, harness, app] of [["claude-code", "claude-code", "Claude Code"], ["codex", "codex", "Codex"], ["pi", "pi", "Pi"], ["hermes", "acp-hermes-agent", "Hermes Agent"]] as const) {
-    group.command(command).description(`Copy recent ${app} chats from this Mac into idle Local threads with their messages.${harness === "acp-hermes-agent" ? " Text only: the agent reads the old messages instead of resuming the session." : ""} Sends no prompts; ${app} is never changed.`)
+  for (const [command, harness, app] of [["claude-code", "claude-code", "Claude Code"], ["codex", "codex", "Codex"], ["pi", "pi", "Pi"], ["hermes", "acp-hermes-agent", "Hermes Agent"], ["t3code", "t3code", "T3 Code"]] as const) {
+    group.command(command).description(`Copy recent ${app} chats from this Mac into idle Local threads with their messages.${harness === "acp-hermes-agent" ? " Text only: the agent reads the old messages instead of resuming the session." : harness === "t3code" ? " Claude Code and Codex chats keep their memory; chats from other agents come over as text." : ""} Sends no prompts; ${app} is never changed.`)
       .option("--days <days>", "Only chats active in the last N days", "30")
       .option("--dry-run", "List the chats without importing them")
       .option("--json", "Print JSON")
@@ -234,10 +234,13 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
     .option("--to-local", "Move a Cloud thread back to this Mac with its conversation and code changes")
     .option("--cancel", "Cancel before cloud execution starts")
     .option("--status", "Read transfer progress without changing it")
+    .option("--check", "Check whether Teleport would work, without moving anything")
     .option("--model <model>", "Run in Cloud on this model instead (requires --reasoning)")
     .option("--reasoning <level>", "Reasoning level for --model")
+    .option("--wait", "Wait until the transfer completes, is cancelled, or fails")
+    .option("--timeout <seconds>", "Stop waiting after this many seconds (with --wait)", "600")
     .option("--json", "Print JSON")
-    .action(action(async (threadId: string, options: JsonOutputOptions & { cancel?: boolean; status?: boolean; model?: string; reasoning?: string; toLocal?: boolean }) => {
+    .action(action(async (threadId: string, options: JsonOutputOptions & { cancel?: boolean; status?: boolean; model?: string; reasoning?: string; toLocal?: boolean; wait?: boolean; timeout: string; check?: boolean }) => {
       const sdk = createCliBbSdk(getUrl());
       if (options.toLocal) {
         const moved = await sdk.cloudroom.teleportLocal(threadId);
@@ -246,8 +249,17 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
       }
       if (Boolean(options.model) !== Boolean(options.reasoning)) throw new Error("Use --model and --reasoning together.");
       const choice = options.model && options.reasoning ? { model: options.model, reasoning: options.reasoning } : undefined;
-      const result = options.status ? await sdk.cloudroom.teleportStatus(threadId) : await sdk.cloudroom.teleport(threadId, options.cancel ? "cancel" : "start", choice);
-      if (!outputJson(options, result)) console.log(result ? `${result.phase}: ${result.completed}/${result.total} files${result.error ? `\n${result.error}` : ""}${result.phase === "complete" ? "\nRunning in cloud. You can close your laptop." : ""}` : "No Teleport transfer.");
+      if (options.check) {
+        const checked = await sdk.cloudroom.teleportCheck(threadId, choice);
+        if (!outputJson(options, checked)) console.log([`Ready: Cloud can run ${checked.model} at ${checked.reasoning} effort.`, ...checked.warnings].join("\n"));
+        return;
+      }
+      const timeoutSeconds = Number(options.timeout);
+      if (!(timeoutSeconds > 0)) throw new Error("--timeout must be a positive number of seconds.");
+      let result = options.status ? await sdk.cloudroom.teleportStatus(threadId) : await sdk.cloudroom.teleport(threadId, options.cancel ? "cancel" : "start", choice);
+      if (options.wait) result = await waitForTeleport(() => sdk.cloudroom.teleportStatus(threadId), result, timeoutSeconds * 1000, options.json === true);
+      if (!outputJson(options, result)) console.log(result ? `${result.phase}: ${result.completed}/${result.total} files${result.error ? `\n${result.error}` : ""}${result.phase === "complete" ? "\nRunning in cloud. You can close your laptop." : ""}${options.wait && !TELEPORT_DONE.includes(result.phase) ? "\nStill running. Check with --status." : ""}` : "No Teleport transfer.");
+      if (options.wait && result?.phase !== (options.cancel ? "cancelled" : "complete")) process.exitCode = 1;
     }));
   group.command("share <thread-id>").description("Make a read-only link to a thread's messages, or update its shared copy. Tool output and files stay private; secrets are removed.")
     .option("--status", "Show the link without changing it")
@@ -271,4 +283,20 @@ export function registerCloudCommands(program: Command, getUrl: () => string): v
     const workspace = await createCliBbSdk(getUrl()).cloudroom.threadWorkspace(threadId);
     if (!outputJson(options, workspace)) console.log(workspace ? `${workspace.path}\n${workspace.branch ?? workspace.head ?? "No Git repository"}` : "Cloud session is not ready.");
   }));
+}
+
+const TELEPORT_DONE = ["complete", "cancelled", "error"];
+
+async function waitForTeleport<T extends { phase: string }>(read: () => Promise<T | null>, first: T | null, timeoutMs: number, quiet: boolean): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs;
+  let progress = first;
+  const say = (next: T | null) => { if (!quiet && next && !TELEPORT_DONE.includes(next.phase)) console.log(`${next.phase}…`); };
+  say(progress);
+  while (progress && !TELEPORT_DONE.includes(progress.phase) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    const next = await read();
+    if (next?.phase !== progress.phase) say(next);
+    progress = next;
+  }
+  return progress;
 }

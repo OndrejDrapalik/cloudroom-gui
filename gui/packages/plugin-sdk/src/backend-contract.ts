@@ -1863,7 +1863,7 @@ export interface PluginAiServices {
 export interface PluginSharedPortTunnelIdentity {
   /** Gate routing label assigned to this machine. */
   label: string;
-  /** Gate apex without a scheme, e.g. "getbb.app". */
+  /** Relay apex without a scheme, e.g. "cloudroom.run". */
   baseDomain: string;
 }
 

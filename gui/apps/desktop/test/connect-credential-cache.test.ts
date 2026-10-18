@@ -8,7 +8,7 @@ import {
 const CREDENTIAL = {
   credential: "bbcm_desktop",
   handle: "laptop",
-  serverUrl: "https://laptop.getbb.app",
+  serverUrl: "https://laptop.cloudroom.run",
 };
 
 function createEncryption(
@@ -64,6 +64,7 @@ describe("createConnectCredentialCache", () => {
     const cache = createConnectCredentialCache({
       encryption,
       fs: createFs(),
+      fileName: "relay-credential.bin",
       userDataPath: "/data",
     });
 
@@ -80,6 +81,7 @@ describe("createConnectCredentialCache", () => {
     const cache = createConnectCredentialCache({
       encryption,
       fs,
+      fileName: "relay-credential.bin",
       userDataPath: "/data",
     });
 
@@ -96,6 +98,7 @@ describe("createConnectCredentialCache", () => {
     const cache = createConnectCredentialCache({
       encryption: createEncryption(),
       fs,
+      fileName: "relay-credential.bin",
       userDataPath: "/data",
     });
 
@@ -115,6 +118,7 @@ describe("createConnectCredentialCache", () => {
     const cache = createConnectCredentialCache({
       encryption,
       fs,
+      fileName: "relay-credential.bin",
       userDataPath: "/data",
     });
     await cache.write(CREDENTIAL);
@@ -131,7 +135,8 @@ describe("createConnectCredentialCache", () => {
       createConnectCredentialCache({
         encryption: createEncryption(),
         fs: undecryptable,
-        userDataPath: "/data",
+        fileName: "relay-credential.bin",
+      userDataPath: "/data",
       }).read(),
     ).resolves.toBeNull();
     expect(undecryptable.file).toBeNull();
@@ -143,7 +148,8 @@ describe("createConnectCredentialCache", () => {
       createConnectCredentialCache({
         encryption: createEncryption(),
         fs: wrongShape,
-        userDataPath: "/data",
+        fileName: "relay-credential.bin",
+      userDataPath: "/data",
       }).read(),
     ).resolves.toBeNull();
     expect(wrongShape.file).toBeNull();

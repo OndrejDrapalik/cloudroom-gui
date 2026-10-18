@@ -11,10 +11,10 @@ You can use either story independently or combine them.
 
 ## Open bb from another browser
 
-The simplest managed route is **bb connect**. Pair the server from Settings →
-Connect (or `bb connect --code ... --server
-...`), then open its getbb.app URL. The server owns the tunnel and reconnects
-after restart.
+The simplest managed route is **Cloudroom Connect**. Once you are signed in to
+Cloudroom, the server registers itself with our relay at cloudroom.run, holds the
+tunnel, and reconnects after restart. Get a one-time code in Settings → Cloudroom
+Connect (or `room-cli connect phone-code`) and enter it at cloudroom.dev/mobile.
 
 For a private tailnet route, keep bb on its loopback default and publish it
 through Tailscale Serve:
@@ -26,12 +26,13 @@ npx bb-app config set BB_APP_URL https://<machine>.<tailnet>.ts.net
 
 Start bb with `npx bb-app` and open the HTTPS URL. Tailscale ACLs are the access
 boundary for this route; do not expose the server through Funnel or the public
-internet. bb connect URLs require the paired account owner's session.
+internet. Cloudroom Connect addresses only open on phones and browsers signed in
+to that Mac.
 
 Existing remote host daemons that target a direct tailnet IP or
 `http://<machine>.<tailnet>.ts.net:38886` must migrate before restarting an
-upgraded server. Prefer pairing bb connect and re-adding the machine from
-Settings → Machines so its installer records the account-gated route. The
+upgraded server. Prefer signing in to Cloudroom and re-adding the machine from
+Settings → Machines so its installer records the cloudroom.run route. The
 private alternative is to open bb through the Tailscale Serve URL and re-run
 the Add machine installer from there.
 
@@ -83,33 +84,12 @@ If Settings reports that it cannot connect to the helper:
 
 Phones and tablets need no helper; editor-launch actions are simply unavailable.
 
-## Use the bb mobile app
+## Use Cloudroom on your phone
 
-The bb mobile app is a client for a bb server; it runs nothing itself. Over
-bb connect it pairs the same way the desktop app does: the phone enrolls as a
-connect machine with its own credential, which the getbb.app dashboard lists
-and can revoke.
-
-1. Pair the bb server with bb connect first (Settings → Remote access, or
-   `bb connect --code … --server …`).
-2. Turn on the **Mobile app** experiment (Settings → Advanced → Experiments, or
-   `bb settings experiment mobileApp true`). Mobile pairing stays hidden
-   without it while the app is in early access.
-3. Mint a pairing code for the phone: Settings → Remote access → **Add mobile
-   device** (QR code plus the code as text, with a countdown), or run
-   `bb connect machine-code` (`--json` prints
-   `{code, serverUrl, apex, expiresAt}`).
-4. In the mobile app, add a server over bb connect and scan the QR code or type
-   the code. Codes last 10 minutes and work once.
-
-The phone keeps its credential in the device keychain and mints short-lived
-sessions from it; it never holds the server's pairing secret. To cut a phone
-off, revoke it in the getbb.app dashboard machine list. Every phone takes one of
-the account's machine slots, so a machine-limit error means an unused device
-should be revoked first. On a trusted network the app can also use a direct
-server URL (Tailscale Serve or `--server-bind-host 0.0.0.0`) with the same
-caveats as a browser. Platforms (iOS first) and what the phone cannot do are
-listed in [platform-support.md](platform-support.md).
+The phone runs the same Cloudroom app as a PWA. Open cloudroom.dev/mobile and
+enter the code from Settings → Cloudroom Connect, or scan its QR code. Then use
+Add to Home Screen. Settings → Cloudroom Connect → Sign out all phones ends every
+phone session.
 
 ### Push notifications on a self-hosted server
 
@@ -146,9 +126,10 @@ The Expo request supports `HTTPS_PROXY` and `NO_PROXY`.
 
 ## Open another of your Macs
 
-Settings → Machines → **Your computers** lists every Mac signed in to the same
-Cloudroom account, through Cloudroom Connect on cloudroom.run. Choose Open to
-use that Mac's projects and threads in this window. Window → Server shows the
+Settings → Machines lists every Mac signed in to the same Cloudroom account,
+through Cloudroom Connect on cloudroom.run. Choose Open to use that Mac's
+projects and threads in this window. Choose Run threads on it to add that Mac as
+a machine: its own Cloudroom installs the machine helper, with nothing to paste. Window → Server shows the
 same list, plus a custom URL. When you pick another Mac, the app stops starting
 a server on this Mac.
 
@@ -167,13 +148,13 @@ them when it starts, when it becomes active, and every five minutes.
 
 Open Settings → Machines and choose Add machine. Run the generated one-line
 installer on the computer that should
-execute work. It installs and enrolls a host daemon; when bb connect is paired,
-the installer also configures the machine credential used to reach the server
-through the account gate. Without bb connect, open the server through a
-Tailscale Serve URL before generating the installer; the loopback listener is
-not directly reachable from another machine. When bb connect is not paired and
-the server URL is a loopback or unspecified address, the dialog does not show an
-installer. It links to Settings → Remote access instead.
+execute work. It installs and enrolls a host daemon. When this Mac is signed in
+to Cloudroom, the installer also configures the machine's own Cloudroom Connect
+credential, so the machine reaches this Mac through cloudroom.run. Signed out,
+open the server through a Tailscale Serve URL before generating the installer;
+the loopback listener is not directly reachable from another machine. When this
+Mac is signed out and the server URL is a loopback or unspecified address, the
+dialog does not show an installer.
 
 The installer always installs the exact host-only `bb-app` package exposed by
 that server at `/install/bb-app.tgz`. The package contains the host daemon,
@@ -224,8 +205,8 @@ After it connects:
 
 Machine names are conveniences and may be duplicated; CLI targeting by name
 requires an unambiguous match. IDs are always accepted. Removing a machine from
-Settings stops bb from dispatching new work to it; revoke a lost machine's bb
-connect access from the getbb.app dashboard as well.
+Settings stops bb from dispatching new work to it and revokes its Cloudroom
+Connect credential.
 
 Browser access and execution remain independent: opening bb on a laptop does
 not enroll that laptop, and enrolling it as a machine does not expose the bb UI.

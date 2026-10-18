@@ -27,7 +27,9 @@ vi.mock("@/lib/sdk", () => ({
   sdk: {
     hosts: {
       delete: vi.fn(),
+      get: vi.fn(),
       list: vi.fn(),
+      experimental_create: vi.fn(),
       experimental_listProviders: vi.fn(),
       experimental_resume: vi.fn(),
       experimental_retryCleanup: vi.fn(),
@@ -99,7 +101,7 @@ function systemConfig(): SystemConfigResponse {
 function stubSidebarBootstrapFetch(): void {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
+    vi.fn().mockImplementation(async () =>
       new Response(
         JSON.stringify({
           projects: [
@@ -562,5 +564,33 @@ describe("MachinesSettingsSection", () => {
       screen.queryByRole("heading", { name: "Remove MacBook Pro?" }),
     ).toBeNull();
     expect(vi.mocked(sdk.hosts.delete)).not.toHaveBeenCalled();
+  });
+  it("lists your other Macs and sets one up to run threads", async () => {
+    vi.mocked(sdk.system.config).mockResolvedValue(systemConfig());
+    vi.mocked(sdk.hosts.list).mockResolvedValue([primaryHost]);
+    const air = { handle: "airhandle", name: "MacBook Air", online: true, self: false, hostId: null, settingUp: false };
+    const self = { handle: "prohandle", name: "MacBook Pro", online: true, self: true, hostId: null, settingUp: false };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) =>
+        url.endsWith("/plugins/connect/rpc/macs")
+          ? Response.json({ ok: true, result: { macs: [self, air] } })
+          : Response.json({ projects: [] }),
+      ),
+    );
+    const created = host({ id: "host_air", name: "MacBook Air", machineProviderId: "mac" });
+    vi.mocked(sdk.hosts.experimental_create).mockResolvedValue(created);
+
+    renderSection();
+
+    expect(await screen.findByText("MacBook Air")).toBeDefined();
+    expect(screen.getByText("Not running threads yet")).toBeDefined();
+    expect(screen.getByText("Every Mac signed in to your Cloudroom account shows up here by itself.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Run threads on it" }));
+    await waitFor(() => {
+      expect(vi.mocked(sdk.hosts.experimental_create)).toHaveBeenCalledWith(
+        expect.objectContaining({ machineProviderId: "mac", inputs: { handle: "airhandle" }, wait: false }),
+      );
+    });
   });
 });

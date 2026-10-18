@@ -71,9 +71,9 @@ worktree` only; a provider takes its branch through `--environment-inputs`.
   runtime promptly. Archive it first when it no longer belongs in active thread
   lists. Stop preserves the thread and supports a later resume.
 - Add remote execution machines from Settings → Machines. Its one-line
-  installer stores the account machine credential locally and configures
-  both the daemon protocol and agent-launched `room-cli` CLI to traverse the account
-  gate; revoke a lost machine from the getbb.app dashboard. It uses
+  installer stores the machine's Cloudroom Connect credential locally and configures
+  both the daemon protocol and agent-launched `room-cli` CLI to reach this Mac
+  through cloudroom.run; removing the machine revokes it. It uses
   the server's exact `/install/bb-app.tgz` artifact and never falls back to npm. It installs under the enrollment's cloudroom data directory, without
   `sudo` or a global npm configuration, and enables daemon `--auto-update`.
   Newer protocol mismatches update that private install with a persisted

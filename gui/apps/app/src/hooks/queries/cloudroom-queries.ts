@@ -43,6 +43,7 @@ export const cloudroomStatusSchema = z.object({
     steer: z.boolean().optional(),
     compact: z.boolean().optional(),
     rewind: z.boolean().optional(),
+    prompt_reasoning: z.boolean().optional(),
   })).nullable().default([]),
 });
 
@@ -227,7 +228,7 @@ export function useOpenCloudFile(threadId: string) {
     mutationFn: (path: string) => sdk.cloudroom.openCloudFile(threadId, path),
     onMutate: () => appToast.loading("Downloading from the cloud"),
     onSuccess: ({ path }, _path, toastId) => appToast.success(`Saved to ${path.replace(/^\/Users\/[^/]+/, "~")}`, { id: toastId }),
-    onError: (error, _path, toastId) => appToast.error("Could not open the cloud file", { id: toastId, description: getMutationErrorMessage({ error, fallbackMessage: "The download failed." }) }),
+    onError: (error, _path, toastId) => appToast.error("Could not save the cloud file", { id: toastId, description: getMutationErrorMessage({ error, fallbackMessage: "The download failed." }) }),
   });
 }
 

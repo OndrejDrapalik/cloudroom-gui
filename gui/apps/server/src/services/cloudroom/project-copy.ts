@@ -163,12 +163,13 @@ async function writeFailureNote(client: CloudroomClient, job: ProjectCopyJob, me
 }
 
 /** What `room-cli files wait` reads (ADR 0209): `copying`, then `ready` or `failed: REASON`, in a file next to the
- *  project folder, so Git never sees it. With `onlyIfCopying`, it changes only a copy still marked `copying`. */
+ *  project folder (a workspace ID, or a path), so Git never sees it. With `onlyIfCopying`, it changes only a copy still
+ *  marked `copying`. Next to the sandbox root (`/code`), only root can write, so it falls back to sudo. */
 export async function writeFilesState(client: CloudroomClient, workspace: string, state: string, onlyIfCopying = false): Promise<void> {
-  const target = (await client.workspace(workspace))?.path;
+  const target = workspace.startsWith("/") ? workspace : (await client.workspace(workspace))?.path;
   if (!target) return;
   const file = `${target}.cloudroom-files`;
-  const write = `cat > ${quote(`${file}.tmp`)} && mv -f -- ${quote(`${file}.tmp`)} ${quote(file)}`;
+  const write = `state=$(cat) && { printf %s "$state" 2>/dev/null > ${quote(`${file}.tmp`)} && mv -f -- ${quote(`${file}.tmp`)} ${quote(file)} || printf %s "$state" | sudo -n tee ${quote(file)} >/dev/null; }`;
   await vm(client, onlyIfCopying ? `if [ "$(cat -- ${quote(file)} 2>/dev/null)" = copying ]; then ${write}; fi` : write, Buffer.from(state));
 }
 

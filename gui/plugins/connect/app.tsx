@@ -19,7 +19,6 @@ import {
   type PhoneCode,
 } from "@/src/types";
 
-const LEGACY_UNTIL = "December 7, 2026";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -30,7 +29,6 @@ const DANGER_QUIET_CLASS =
 
 const STATES: readonly ConnectStateName[] = [
   "disconnected",
-  "pairing",
   "connected",
   "reconnecting",
 ];
@@ -74,14 +72,11 @@ function asStatus(payload: unknown): ConnectStatus | null {
       }
     }
   }
-  const legacy = record.legacy as { url?: unknown; state?: unknown } | null;
   return {
     state: record.state,
     paired: record.paired,
     handle: typeof record.handle === "string" ? record.handle : null,
     url: typeof record.url === "string" ? record.url : null,
-    dashboardUrl:
-      typeof record.dashboardUrl === "string" ? record.dashboardUrl : "",
     lastError: typeof record.lastError === "string" ? record.lastError : null,
     nextRetryAt:
       typeof record.nextRetryAt === "number" ? record.nextRetryAt : null,
@@ -94,13 +89,6 @@ function asStatus(payload: unknown): ConnectStatus | null {
         : null,
     shares,
     signedIn: record.signedIn === true,
-    legacy:
-      legacy !== null &&
-      typeof legacy === "object" &&
-      typeof legacy.url === "string" &&
-      isState(legacy.state)
-        ? { url: legacy.url, state: legacy.state }
-        : null,
   };
 }
 
@@ -739,37 +727,11 @@ function SignOutPhones() {
   );
 }
 
-function LegacyNote({ url }: { url: string }) {
-  const rpc = useRpc<typeof connectRpcContract>();
-  const [pending, setPending] = useState(false);
-  return (
-    <SettingRow
-      title="Old link"
-      detail={`${hostOf(url)} still works until ${LEGACY_UNTIL}. Use cloudroom.dev/mobile instead.`}
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className={DANGER_QUIET_CLASS}
-        disabled={pending}
-        onClick={() => {
-          setPending(true);
-          rpc.call("disconnect").finally(() => setPending(false));
-        }}
-      >
-        Turn off old link
-      </Button>
-    </SettingRow>
-  );
-}
-
 function SettingsTab({ status }: { status: ConnectStatus }) {
   return (
     <div className="divide-y divide-border-seam rounded-lg border border-border">
       <RemoteInstructionsRow />
       {status.paired ? <SignOutPhones /> : null}
-      {status.legacy !== null ? <LegacyNote url={status.legacy.url} /> : null}
     </div>
   );
 }
@@ -913,10 +875,10 @@ function ConnectSettingsSection() {
       </div>
       {tab === "phone" ? <PhoneTab status={status} /> : null}
       {tab === "servers" ? (
-        status.paired || status.legacy !== null ? (
+        status.paired ? (
           <SharedPortsSection
             shares={status.shares}
-            dimmed={status.state !== "connected" && status.legacy?.state !== "connected"}
+            dimmed={status.state !== "connected"}
           />
         ) : (
           <p className="text-sm text-muted-foreground">

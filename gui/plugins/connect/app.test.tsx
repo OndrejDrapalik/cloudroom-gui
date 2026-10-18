@@ -30,7 +30,6 @@ function status(overrides: Partial<ConnectStatus> = {}): ConnectStatus {
     paired: false,
     handle: null,
     url: null,
-    dashboardUrl: "https://cloudroom.run/dashboard",
     lastError: null,
     nextRetryAt: null,
     since: 1_700_000_000_000,
@@ -38,7 +37,6 @@ function status(overrides: Partial<ConnectStatus> = {}): ConnectStatus {
     lastRemoteActivityAt: null,
     shares: [],
     signedIn: true,
-    legacy: null,
     ...overrides,
   };
 }
@@ -148,28 +146,6 @@ describe("connect settings section", () => {
     await slot.findByText("Signed out 2 sessions.");
   });
 
-  it("keeps the old getbb.app link visible until it is turned off", async () => {
-    const slot = renderSlot(
-      app.settingsSections[0]!,
-      {},
-      {
-        rpc: {
-          status: () =>
-            connected({ legacy: { url: "https://sawyer.getbb.app", state: "connected" } }),
-          phoneCode,
-          remoteInstructions: () => ({ enabled: true }),
-          disconnect: () => connected(),
-        },
-      },
-    );
-    fireEvent.click(await slot.findByRole("tab", { name: /Settings/ }));
-    await slot.findByText(/still works/);
-    fireEvent.click(slot.getByRole("button", { name: "Turn off old link" }));
-    await waitFor(() =>
-      expect(slot.rpcCalls.some((call) => call.method === "disconnect")).toBe(true),
-    );
-  });
-
   it("revokes a shared port", async () => {
     const slot = renderSlot(
       app.settingsSections[0]!,
@@ -184,7 +160,7 @@ describe("connect settings section", () => {
                   hostName: "Workstation",
                   port: 3000,
                   createdAt: 1,
-                  url: "https://workstation--3000.getbb.app",
+                  url: "https://workstation--3000.cloudroom.run",
                 },
               ],
             }),
@@ -269,14 +245,14 @@ describe("connect settings section", () => {
                   hostName: "Workstation",
                   port: 3000,
                   createdAt: 2,
-                  url: "https://workstation--3000.getbb.app",
+                  url: "https://workstation--3000.cloudroom.run",
                 },
                 {
                   hostId: "host-server",
                   hostName: "Workstation",
                   port: 8080,
                   createdAt: 3,
-                  url: "https://workstation--8080.getbb.app",
+                  url: "https://workstation--8080.cloudroom.run",
                 },
               ],
             }),
@@ -292,10 +268,10 @@ describe("connect settings section", () => {
 
     expect(
       slot
-        .getByText("workstation--3000.getbb.app")
+        .getByText("workstation--3000.cloudroom.run")
         .closest("a")
         ?.getAttribute("href"),
-    ).toBe("https://workstation--3000.getbb.app");
+    ).toBe("https://workstation--3000.cloudroom.run");
     slot.getByText(`Unavailable — ${reason}`);
     expect(
       slot.queryByRole("button", { name: "Copy share URL for port 5173" }),
@@ -321,7 +297,7 @@ describe("connect settings section", () => {
           status: () => connected({ shares: [] }),
           phoneCode,
           expose: () => {
-            throw new Error("this bb is not connected to getbb.app");
+            throw new Error("Cloudroom Connect is still setting up");
           },
         },
       },
@@ -343,7 +319,7 @@ describe("connect settings section", () => {
         input: { port: 8080 },
       }),
     );
-    await slot.findByText(/this bb is not connected to getbb.app/);
+    await slot.findByText(/Cloudroom Connect is still setting up/);
   });
 
 });

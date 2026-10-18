@@ -59,13 +59,14 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/v1/cloudroom/threads/:id/teleport", async context => {
     const problem = browserRequestProblem(context, deps, { requireJsonForMutation: true });
     if (problem) return context.json({ message: "Use the local Cloudroom app or CLI." }, problem.status);
-    const body = z.object({ action: z.enum(["start", "cancel", "local", "copy", "move"]).default("start"), model: z.string().min(1).optional(), reasoning: z.string().min(1).optional() }).strict().parse(await context.req.json());
+    const body = z.object({ action: z.enum(["start", "cancel", "local", "copy", "move", "check"]).default("start"), model: z.string().min(1).optional(), reasoning: z.string().min(1).optional() }).strict().parse(await context.req.json());
     const id = context.req.param("id");
     if (body.action === "cancel") { await teleports(deps).cancel(id); return context.json(teleportProgress(deps.db, id), 202); }
     if (body.action === "local") return context.json(await teleportToLocal(deps, id));
     if (body.action === "copy") return context.json(await copyToMac(deps, id));
     const choice = body.model && body.reasoning ? { model: body.model, reasoning: body.reasoning } : undefined;
     if (body.action === "move") return context.json(await moveToSandbox(deps, id, choice), 202);
+    if (body.action === "check") return context.json(await teleports(deps).check(id, choice));
     return context.json(await teleports(deps).begin(id, choice), 202);
   });
   app.get("/api/v1/cloudroom/threads/:id/share", async context => context.json(await threadShare(deps, context.req.param("id"))));
@@ -99,7 +100,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   app.post("/api/v1/cloudroom/import/sessions", async context => {
     const input = z.object({
       hostId: z.string().min(1),
-      sessions: z.array(z.object({ harness: z.enum(["claude-code", "codex", "pi", "acp-hermes-agent"]), id: z.string().min(1) }).strict()).min(1).max(2000),
+      sessions: z.array(z.object({ harness: z.enum(["claude-code", "codex", "pi", "acp-hermes-agent", "t3code"]), id: z.string().min(1) }).strict()).min(1).max(2000),
     }).strict().parse(await context.req.json());
     return context.json(await importNativeSessions(deps, input.hostId, input.sessions));
   });
@@ -203,7 +204,7 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   // Cloud automations (ADR 0212): the website stores and runs them, so they keep running while this Mac is off.
   // A child Cloud thread shares its parent's sandbox, so the website gets the parent and the child's own session.
   app.post("/api/v1/cloudroom/account/automations", async (context) => {
-    const input = z.object({ action: z.enum(["list", "create", "update", "run", "delete"]), thread: z.string().min(1).max(64).optional() }).passthrough().parse(await context.req.json());
+    const input = z.object({ action: z.enum(["list", "create", "update", "run", "delete", "hook", "unhook", "events", "ack"]), thread: z.string().min(1).max(64).optional() }).passthrough().parse(await context.req.json());
     let body: Record<string, unknown> = input;
     if (input.action === "create") {
       const thread = input.thread ? getThread(deps.db, input.thread) : null;
@@ -269,10 +270,12 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
   // The browser sign-in returns to this Mac; the tokens go straight to the website and never reach the app.
   app.post("/api/v1/cloudroom/account/mcp/sign-in", async (context) => {
     const { name } = z.object({ name: z.string().min(1) }).strict().parse(await context.req.json());
+    const account = await cloudroom(deps).sandboxes.account();
+    if (!account) throw new ApiError(409, "cloud_mcp", "Sign in to Cloudroom first.");
     const server = (await macMcpServers()).find(entry => entry.name === name)?.server ?? null;
     if (!isRemoteMcp(server)) throw new ApiError(400, "cloud_mcp", `${name} doesn't use a sign-in Cloudroom can do.`);
     const redirect = `${new URL(context.req.url).origin}/api/v1/cloudroom/account/mcp/callback`;
-    return context.json({ url: await startMcpSignIn(name, server, redirect).catch((error: unknown) => {
+    return context.json({ url: await startMcpSignIn(name, server, redirect, account).catch((error: unknown) => {
       throw new ApiError(error instanceof CloudroomError && error.status ? 400 : 503, "cloud_mcp", error instanceof Error ? error.message : String(error));
     }) });
   });
@@ -280,8 +283,9 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     const escape = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
     const page = (title: string, detail: string) => context.html(`<!doctype html><meta charset="utf-8"><title>${escape(title)}</title><body style="font:15px system-ui;margin:15vh auto;max-width:28rem;padding:0 1rem;text-align:center"><h1 style="font-size:20px">${escape(title)}</h1><p>${escape(detail)}</p></body>`);
     try {
-      const { name, server, signIn } = await finishMcpSignIn(new URL(context.req.url).searchParams);
-      await cloudroom(deps).sandboxes.saveMcpSignIn(name, server, signIn);
+      const sandboxes = cloudroom(deps).sandboxes;
+      const { name, server, signIn, account } = await finishMcpSignIn(new URL(context.req.url).searchParams, await sandboxes.account());
+      await sandboxes.saveMcpSignIn(name, server, signIn, account);
       return page(`Signed in to ${name}`, "Every cloud thread can use it now. You can close this tab.");
     } catch (error) {
       deps.logger.warn({ error: error instanceof Error ? error.message : String(error) }, "Cloud MCP sign-in failed");

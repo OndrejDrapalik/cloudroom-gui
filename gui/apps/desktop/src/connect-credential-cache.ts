@@ -5,8 +5,6 @@ import {
   type ConnectCredential,
 } from "@cloudroom/connect-client";
 
-const CONNECT_CREDENTIAL_FILE_NAME = "connect-credential.bin";
-
 export interface ConnectCredentialEncryption {
   decryptString(encrypted: Buffer): string;
   encryptString(plainText: string): Buffer;
@@ -21,7 +19,7 @@ export interface ConnectCredentialCacheFs {
 
 interface CreateConnectCredentialCacheArgs {
   encryption: ConnectCredentialEncryption;
-  fileName?: string;
+  fileName: string;
   fs?: ConnectCredentialCacheFs;
   userDataPath: string;
 }
@@ -43,7 +41,7 @@ export function createConnectCredentialCache(
   args: CreateConnectCredentialCacheArgs,
 ): ConnectCredentialCache {
   const fsImpl = args.fs ?? defaultFs;
-  const filePath = join(args.userDataPath, args.fileName ?? CONNECT_CREDENTIAL_FILE_NAME);
+  const filePath = join(args.userDataPath, args.fileName);
 
   async function clear(): Promise<void> {
     await fsImpl.rm(filePath, { force: true });
