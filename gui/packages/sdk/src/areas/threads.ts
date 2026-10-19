@@ -168,6 +168,9 @@ export interface ThreadOutputResponse {
 }
 export type ThreadMutationResult = ThreadResponse;
 export type ThreadPluginMetadataResult = ThreadPluginMetadataResponse;
+export interface PluginThreadMetadataListResult {
+  threads: { threadId: string; metadata: ThreadPluginMetadataResponse }[];
+}
 export type ThreadSpawnResult = ThreadResponse;
 export type ThreadForkResult = ThreadResponse;
 export type ThreadInteractionGetResult = PendingInteraction;
@@ -245,6 +248,11 @@ export interface ThreadUpdateArgs extends UpdateThreadRequest {
   threadId: string;
 }
 
+export interface PluginThreadMetadataListArgs {
+  pluginId: string;
+  threadIds: readonly string[];
+  signal?: AbortSignal;
+}
 export interface ThreadPluginMetadataArgs {
   pluginId: string;
   signal?: AbortSignal;

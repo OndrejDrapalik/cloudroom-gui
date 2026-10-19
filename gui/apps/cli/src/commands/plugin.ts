@@ -1168,7 +1168,7 @@ export function registerPluginCommands(
           result.installed.display,
           result.candidate?.display ?? "—",
           blockedSummary(result),
-          `${UPDATE_STATUS_LABELS[result.outcome]}${result.devMode ? " [dev build: engines.bb not enforced]" : ""}`,
+          `${UPDATE_STATUS_LABELS[result.outcome]}${result.devMode ? " [dev build]" : ""}`,
         ]);
         console.log(
           renderBorderlessTable(
@@ -1649,6 +1649,36 @@ export function registerPluginCommands(
         }),
       );
   }
+
+  plugin
+    .command("safe-mode [state]")
+    .description(
+      "Show plugin safe mode, or turn it on or off. `on` stops every plugin that doesn't ship with Cloudroom (official catalog plugins included); `off` restarts the ones that were enabled and exits 1 if any fail to start",
+    )
+    .option("--json", "Output JSON")
+    .action(
+      action(async (state: string | undefined, opts: JsonOutputOptions) => {
+        if (state !== undefined && state !== "on" && state !== "off") {
+          exitWithError({ error: `expected "on" or "off", got "${state}"` });
+        }
+        const plugins = createCliBbSdk(getUrl()).plugins;
+        const updated =
+          state === undefined
+            ? null
+            : await plugins.experimental_setSafeMode({
+                enabled: state === "on",
+              });
+        const result = updated ?? (await plugins.experimental_getSafeMode());
+        const problems = updated?.problems ?? [];
+        if (opts.json) {
+          outputJson(opts, result);
+        } else {
+          console.log(`Plugin safe mode is ${result.enabled ? "on" : "off"}.`);
+          for (const problem of problems) console.error(problem);
+        }
+        if (problems.length > 0) process.exit(1);
+      }),
+    );
 
   plugin
     .command("config <id> [action] [key] [value]")

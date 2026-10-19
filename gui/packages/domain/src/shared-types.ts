@@ -540,6 +540,17 @@ export type RuntimePermissionPolicy = z.infer<
 export const promptModeSchema = z.literal("plan");
 export type PromptMode = z.infer<typeof promptModeSchema>;
 
+export const sessionOptionValueSchema = z.union([z.string(), z.boolean()]);
+export type SessionOptionValue = z.infer<typeof sessionOptionValueSchema>;
+
+export const sessionOptionSelectionsSchema = z.record(
+  z.string().min(1),
+  sessionOptionValueSchema,
+);
+export type SessionOptionSelections = z.infer<
+  typeof sessionOptionSelectionsSchema
+>;
+
 const runtimeThreadExecutionBaseOptionsSchema = z.object({
   model: z.string().min(1),
   serviceTier: serviceTierSchema,

@@ -352,11 +352,9 @@ export function createPluginCatalogService(deps: {
   }
 
   function compatibilityProblem(ranges: {
-    bbRange: string | undefined;
     sdkRange: string | undefined;
   }): string | null {
     const compatibility = evaluateCompatibility({
-      bbRange: ranges.bbRange,
       sdkRange: ranges.sdkRange,
       appVersion: deps.appVersion,
     });
@@ -390,7 +388,6 @@ export function createPluginCatalogService(deps: {
     return {
       manifest,
       problem: compatibilityProblem({
-        bbRange: manifest.bbEngineRange,
         sdkRange: manifest.bbPluginSdkRange,
       }),
     };
@@ -470,7 +467,6 @@ export function createPluginCatalogService(deps: {
       manifest === null
         ? null
         : compatibilityProblem({
-            bbRange: manifest.bbEngineRange,
             sdkRange: manifest.bbPluginSdkRange,
           });
     const metadata = catalogEntryMetadata({

@@ -12,6 +12,8 @@ import type { PromptTextMention } from "@cloudroom/domain";
 import type {
   BbContext,
   BbNavigate,
+  ComposerDraftSnapshot,
+  ComposerMention,
   ComposerView,
   PluginComposerApi,
   PluginComposerMention,
@@ -51,6 +53,7 @@ import {
 import {
   appendQuoteAndAttachmentsToDraft,
   isPromptDraftEmpty,
+  type PromptDraftState,
 } from "@cloudroom/client-core";
 import {
   AUTOMATIONS_PLUGIN_ID,
@@ -384,6 +387,7 @@ export function useBbNavigate(): BbNavigate {
       openThreadPanel,
       experimental_openFileExternally,
       experimental_openFilePreview,
+      experimental_openTerminal: async () => false,
       openUrl,
       experimental_openUrl: deprecatedAlias(
         "experimental_openUrl",
@@ -834,6 +838,7 @@ export function useComposer(): PluginComposerApi {
     [hostSubmit, pluginId, scopeOwnership],
   );
 
+  const view = useComposerView();
   return useMemo(
     () => ({
       scope:
@@ -841,7 +846,9 @@ export function useComposer(): PluginComposerApi {
         (threadId !== undefined
           ? { kind: "thread", threadId }
           : { kind: "new-thread", projectId: projectId ?? null }),
-      text: composerText,
+      get text() {
+        return getCurrent().text;
+      },
       setText,
       updateText,
       clear,
@@ -852,6 +859,31 @@ export function useComposer(): PluginComposerApi {
       insertMention,
       focus,
       experimental_submit,
+      key: textEffectKey ?? "",
+      layout: view.layout === "compact" ? "compact" : "expanded",
+      isRunning: view.run.isRunning,
+      isSubmitting: view.run.isSubmitting,
+      isSubmittingBlocked: false,
+      submittingBlockedReason: null,
+      isEmpty: view.draft.isEmpty,
+      attachmentCount: view.draft.attachmentCount,
+      get draft() {
+        return composerDraftSnapshot(getCurrent());
+      },
+      selection: null,
+      submit: experimental_submit,
+      experimental_openPopup: () => false,
+      experimental_closePopup: () => false,
+      replace: () => unsupportedComposerMember("replace"),
+      insert: () => unsupportedComposerMember("insert"),
+      removeMention: () => unsupportedComposerMember("removeMention"),
+      experimental_removeMention: () =>
+        unsupportedComposerMember("removeMention"),
+      onSubmitted: () => unsupportedComposerMember("onSubmitted"),
+      experimental_onSubmitted: () => unsupportedComposerMember("onSubmitted"),
+      setSelection: async () => unsupportedComposerMember("setSelection"),
+      experimental_setSelection: async () =>
+        unsupportedComposerMember("setSelection"),
     }),
     [
       addQuote,
@@ -860,13 +892,113 @@ export function useComposer(): PluginComposerApi {
       composerText,
       experimental_submit,
       focus,
+      getCurrent,
       insertMention,
       projectId,
       setText,
       setTextEffect,
       setInputLock,
+      textEffectKey,
       threadId,
       updateText,
+      view,
     ],
   );
+}
+
+type LegacyComposerDraftSnapshot = ComposerDraftSnapshot & {
+  isEmpty: boolean;
+  attachmentCount: number;
+};
+
+const composerDraftSnapshots = new WeakMap<
+  PromptDraftState,
+  LegacyComposerDraftSnapshot
+>();
+
+function composerDraftSnapshot(
+  draft: PromptDraftState,
+): LegacyComposerDraftSnapshot {
+  let snapshot = composerDraftSnapshots.get(draft);
+  if (snapshot === undefined) {
+    snapshot = {
+      text: draft.text,
+      isEmpty: isPromptDraftEmpty(draft),
+      attachmentCount: draft.attachments.length,
+      mentions: draft.mentions.map(composerMention),
+      attachments: draft.attachments.map((attachment) => ({
+        type: attachment.type,
+        path: attachment.path,
+        name: attachment.name,
+        ...(attachment.mimeType === undefined
+          ? {}
+          : { mimeType: attachment.mimeType }),
+        ...(attachment.sizeBytes > 0 ? { sizeBytes: attachment.sizeBytes } : {}),
+      })),
+    };
+    composerDraftSnapshots.set(draft, snapshot);
+  }
+  return snapshot;
+}
+
+function composerMention({
+  start,
+  end,
+  resource,
+}: PromptTextMention): ComposerMention {
+  const range = { from: start, to: end, label: resource.label };
+  switch (resource.kind) {
+    case "thread":
+      return {
+        ...range,
+        kind: "thread",
+        threadId: resource.threadId,
+        ...(resource.projectId === undefined
+          ? {}
+          : { projectId: resource.projectId }),
+      };
+    case "project":
+      return { ...range, kind: "project", projectId: resource.projectId };
+    case "section":
+      return { ...range, kind: "section", sectionId: resource.sectionId };
+    case "path":
+      return {
+        ...range,
+        kind: "path",
+        path: resource.path,
+        source: resource.source,
+        entryKind: resource.entryKind,
+      };
+    case "command":
+      return {
+        ...range,
+        kind: "command",
+        trigger: resource.trigger,
+        name: resource.name,
+        source: resource.source,
+        origin: resource.origin,
+        argumentHint: resource.argumentHint,
+      };
+    case "plugin": {
+      const separator = resource.itemId.indexOf(":");
+      return {
+        ...range,
+        kind: "plugin",
+        pluginId: resource.pluginId,
+        provider:
+          separator === -1
+            ? resource.pluginId
+            : resource.itemId.slice(0, separator),
+        id:
+          separator === -1
+            ? resource.itemId
+            : resource.itemId.slice(separator + 1),
+        icon: resource.icon ?? null,
+      };
+    }
+  }
+}
+
+function unsupportedComposerMember(name: string): never {
+  throw new Error(`useComposer().${name} is not supported in Cloudroom yet.`);
 }

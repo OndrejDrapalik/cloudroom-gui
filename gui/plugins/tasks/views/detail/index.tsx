@@ -19,7 +19,7 @@ import {
   createDescriptionSaver,
   type DescriptionSaver,
 } from "./description-save.js";
-import { StatusIcon } from "./meta.js";
+import { StatusIcon } from "../../components/task-icons.js";
 import { STATUS_LABELS } from "../list/lib.js";
 import {
   InlineProperties,

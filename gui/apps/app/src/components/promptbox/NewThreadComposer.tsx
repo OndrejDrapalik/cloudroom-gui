@@ -1543,9 +1543,7 @@ export function NewThreadComposer({
   // The cloud queue (docs/scopes/public-launch.md): the card under the composer explains, and Send waits.
   const cloudQueue = executionTarget === "cloud" ? cloudConnection.data?.cloudQueue ?? null : null;
   // Shown as a banner too, so an unavailable agent is never a silent greyed-out button.
-  const cloudBlockedReason = executionTarget === "cloud" && selectedProviderId === "acp-cursor"
-    ? "Cursor isn't available in Cloud. Use Codex or Claude Code."
-    : !cloudKnown || cloudHarness(cloudConnection.data, selectedProviderId)
+  const cloudBlockedReason = !cloudKnown || cloudHarness(cloudConnection.data, selectedProviderId)
     ? null
     : selectedProviderId === "claude-code"
       ? "Claude Code is not configured in Cloud yet."

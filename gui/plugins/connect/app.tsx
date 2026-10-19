@@ -14,9 +14,9 @@ import { Switch } from "@cloudroom/shared-ui/switch";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import {
   CONNECT_REALTIME_CHANNEL,
+  PHONE_SETUP_URL,
   type ConnectStateName,
   type ConnectStatus,
-  type PhoneCode,
 } from "@/src/types";
 
 
@@ -508,75 +508,21 @@ function SharedPortsSection({
   );
 }
 
-function PhoneCodeCard() {
-  const rpc = useRpc<typeof connectRpcContract>();
-  const [code, setCode] = useState<PhoneCode | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  const refresh = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    rpc.call("phoneCode").then(
-      (next) => {
-        setLoading(false);
-        setCode(next);
-      },
-      (rpcError: unknown) => {
-        setLoading(false);
-        setError(errorText(rpcError));
-      },
-    );
-  }, [rpc]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (code === null) return;
-    const timer = setTimeout(refresh, Math.max(0, code.expiresAt - Date.now()));
-    return () => clearTimeout(timer);
-  }, [code, refresh]);
-
+function PhoneSetupCard() {
   return (
     <div className="flex items-center gap-8 rounded-lg border border-border p-6">
-      {code !== null ? (
-        <QrCodeImage
-          value={code.url}
-          alt="QR code to open Cloudroom on your phone"
-          className="size-48 shrink-0 p-2"
-        />
-      ) : (
-        <div className="size-48 shrink-0 rounded-md bg-surface-recessed" />
-      )}
+      <QrCodeImage
+        value={PHONE_SETUP_URL}
+        alt="QR code to set up Cloudroom on your phone"
+        className="size-48 shrink-0 p-2"
+      />
       <div className="min-w-0 flex-1 space-y-1">
         <h3 className="text-base font-semibold text-foreground">Scan with your phone</h3>
         <p className="text-sm text-muted-foreground">
           Or open{" "}
-          <span className="font-medium text-foreground">cloudroom.dev/mobile</span>{" "}
-          and enter:
+          <span className="font-medium text-foreground">cloudroom.dev/m</span>
+          {" "}on your phone. Sign in with your Cloudroom account and tap Open Cloudroom.
         </p>
-        <p className="pt-3 font-mono text-4xl font-semibold tracking-widest text-foreground">
-          {code?.code ?? "····-····"}
-        </p>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground">Works once, for 10 minutes.</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-muted-foreground"
-            disabled={loading}
-            onClick={refresh}
-          >
-            {loading ? <Icon name="Spinner" className="size-4 animate-spin" /> : null}
-            New code
-          </Button>
-        </div>
-        {error !== null ? (
-          <p className="text-xs text-destructive-text">{error}</p>
-        ) : null}
       </div>
     </div>
   );
@@ -593,14 +539,14 @@ function PhoneTab({ status }: { status: ConnectStatus }) {
   if (!status.paired) {
     return (
       <p className="text-sm text-muted-foreground">
-        Your phone code appears here once Cloudroom Connect is ready.
+        Your phone can reach this Mac once Cloudroom Connect is ready.
       </p>
     );
   }
   const connected = status.state === "connected";
   return (
     <div className="space-y-3">
-      <PhoneCodeCard />
+      <PhoneSetupCard />
       <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
         Tip: add it to your Home Screen. On iPhone, tap Share, then Add to Home
         Screen. On Android, open the browser menu and tap Install app.

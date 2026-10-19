@@ -24,6 +24,10 @@ import {
 import { BrowsePluginsTab } from "@/components/plugin/management/BrowsePluginsTab";
 import { CheckPluginUpdatesButton } from "@/components/plugin/management/CheckPluginUpdatesButton";
 import { InstalledPluginsTab } from "@/components/plugin/management/InstalledPluginsTab";
+import {
+  PluginSafeModeBanner,
+  PluginSafeModeButton,
+} from "@/components/plugin/management/PluginSafeMode";
 import { PluginAuthorPage } from "@/components/plugin/management/PluginAuthorPage";
 import {
   pluginPublisherFilterId,
@@ -216,12 +220,14 @@ export function PluginsOverview({
                   }
                 />
                 {plugins.length > 0 ? <CheckPluginUpdatesButton /> : null}
+                <PluginSafeModeButton />
               </>
             }
           />
         }
       >
         <div className={cn("space-y-3", TOOLS_PAGE_BAND_CLASSES)}>
+          <PluginSafeModeBanner />
           {listQuery.isError ? (
             <ResourceListState
               state="error"

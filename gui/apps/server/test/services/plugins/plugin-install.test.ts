@@ -948,7 +948,7 @@ describe("plugin install flows", () => {
       });
     });
 
-    it("hard-fails install on an engines.bb mismatch and cleans up the clone", async () => {
+    it("installs despite an engines.bb mismatch (BB's app version is ignored)", async () => {
       const repoDir = join(workDir, "repo-too-new");
       await writePluginFixture(repoDir, {
         name: "bb-plugin-too-new",
@@ -957,19 +957,10 @@ describe("plugin install flows", () => {
       await initGitRepo(repoDir);
       await commitAll(repoDir, "init");
 
-      const source = `git:${repoDir}@main`;
-      await expect(
-        service.install(source, { kind: "root" }),
-      ).rejects.toThrowError(/install refused.*requires Cloudroom >=99\.0\.0/);
-      expect(service.list()).toHaveLength(0);
-      const managed = join(
-        dataDir,
-        "plugins",
-        "git",
-        "local",
-        ...repoDir.replace(/^\/+/, "").split("/"),
-      );
-      await expect(stat(`${managed}@main`)).rejects.toThrowError();
+      const entry = await service.install(`git:${repoDir}@main`, {
+        kind: "root",
+      });
+      expect(entry.status).toBe("running");
     });
 
     it("hard-fails managed install on an engines.bbPluginSdk mismatch", async () => {
@@ -1009,48 +1000,6 @@ describe("plugin install flows", () => {
 
       expect(await service.remove("localdir")).toBe(true);
       await stat(join(pathDir, "package.json"));
-    });
-
-    it("refuses a cached artifact whose engine range no longer matches", async () => {
-      const repoDir = join(workDir, "repo-cached-engine");
-      await writePluginFixture(repoDir, {
-        name: "bb-plugin-cached-engine",
-        engines: ">=0.9.0",
-      });
-      await initGitRepo(repoDir);
-      await commitAll(repoDir, "init");
-      const source = `git:${repoDir}@main`;
-
-      await service.install(source, { kind: "root" });
-      expect(await service.remove("cached-engine")).toBe(true);
-      const clonesBefore = materializationCount;
-      await service.stop();
-
-      service = createPluginService({
-        aiServices: createAiServiceRegistry(),
-        telemetry: createNoopTelemetryService(),
-        db,
-        hub: {
-          getDaemonSessionIdForHost: () => null,
-          notifyPluginSignal: () => 0,
-          notifySystem: () => {},
-        },
-        logger,
-        dataDir,
-        appVersion: "0.5.0",
-        loadTimeoutMs: 2000,
-        onArtifactMaterialize: () => {
-          materializationCount += 1;
-        },
-      });
-
-      await expect(
-        service.install(source, { kind: "root" }),
-      ).rejects.toThrowError(/install refused.*requires Cloudroom >=0\.9\.0/u);
-      expect(materializationCount).toBe(clonesBefore);
-      expect(
-        getInstalledPluginRegistration(db, "cached-engine"),
-      ).toBeUndefined();
     });
 
     it("refuses a git url without the git binary being asked to run arbitrary flags", async () => {

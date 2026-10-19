@@ -5,7 +5,7 @@ import { events, findLastCompletedRootStoredTurn, findLastRootStoredTurnStarted,
 import type { Thread } from "@cloudroom/domain";
 import { z } from "zod";
 import { ApiError } from "../../errors.js";
-import { UPLOAD_PART, type CloudroomClient, type Harness, type TeleportManifest } from "./client.js";
+import { CloudroomError, UPLOAD_PART, type CloudroomClient, type Harness, type TeleportManifest } from "./client.js";
 import { cloudroom } from "./commands.js";
 import { SKIPPED } from "./project-copy.js";
 import { binding } from "./store.js";
@@ -90,8 +90,13 @@ export async function startCloudFork(
   const from = await cloudroom(deps).threadClient(fork.source_thread_id);
   const workspace = (await from.sessionWorkspace(source.sessionId)).path;
   const snapshot = (id: string) => sourceCode(from, workspace, id).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
-  // A retry after activation keeps the started fork instead of starting a second one.
-  const done = fork.transfer ? await client.teleportStatus(fork.transfer).catch(() => null) : null;
+  // A retry after activation keeps the started fork instead of starting a second one. Only Core's own "not found"
+  // proves the saved transfer never started: a timeout (Core busy loading a big conversation) retries later, since a
+  // second copy of the same conversation is always rejected.
+  const done = fork.transfer ? await client.teleportStatus(fork.transfer).catch((error: unknown) => {
+    if (error instanceof CloudroomError && error.status === 404 && error.message.endsWith("session not found")) return null;
+    throw error;
+  }) : null;
   if (fork.transfer && done?.session_id) {
     await idle(client, done.session_id);
     return { sessionId: done.session_id, transfer: fork.transfer, code: snapshot(fork.transfer) };

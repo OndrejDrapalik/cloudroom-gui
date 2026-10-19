@@ -24,7 +24,7 @@ import {
 } from "./list-preference.js";
 import { sortTasks } from "../../shared/sort.js";
 import type { TaskSort } from "../../shared/pagination.js";
-import { StatusIcon } from "./icons.js";
+import { StatusIcon } from "../../components/task-icons.js";
 import {
   listScrollScopeKey,
   useListScrollRestoration,

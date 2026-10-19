@@ -29,9 +29,12 @@ describe("app theme preview", () => {
     applyCachedAppThemeCss();
     const css = resolveAppThemeCss(defaultAppTheme);
     expect(styleText()).toBe(css);
-    const light = css.split(":root:not(.dark) {")[1];
-    for (const token of ["primary-text", "ring", "timeline-accent"]) {
-      expect(light).toContain(`--${token}: var(--ink)`);
+    const light = css.split(":root:not(.dark), .light {")[1];
+    expect(light).toContain("--primary: #457500");
+    expect(light).toContain("--primary-foreground: #ffffff");
+    expect(light).toContain("--primary-text: #3d5600");
+    for (const token of ["ring", "skill-mention-foreground"]) {
+      expect(light).toContain(`--${token}: var(--primary)`);
     }
     expect(light).toContain("--sidebar-ring: var(--ring)");
   });
@@ -58,10 +61,7 @@ describe("app theme preview", () => {
       );
     }
     expect(defaultCss).toContain(
-      "--input: color-mix(in oklab, var(--ink) 55%, var(--canvas))",
-    );
-    expect(defaultCss).toContain(
-      "--input: color-mix(in oklab, var(--primary) 60%, var(--canvas))",
+      "--input: color-mix(in oklab, var(--primary) 80%, var(--canvas))",
     );
     expect(defaultCss).toContain("--file-accent: var(--timeline-accent)");
     applyAppThemeCss(defaultCss);

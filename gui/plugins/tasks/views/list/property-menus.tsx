@@ -28,7 +28,7 @@ import {
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 import type { TaskEdit } from "./optimistic.js";
-import { PriorityIcon, StatusIcon } from "./icons.js";
+import { PriorityIcon, StatusIcon } from "../../components/task-icons.js";
 import {
   DUE_DATE_PRESETS,
   formatDueDate,

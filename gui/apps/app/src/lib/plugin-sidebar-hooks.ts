@@ -8,6 +8,7 @@ import {
 import { useIsCompactViewport } from "@cloudroom/shared-ui/hooks/use-compact-viewport";
 import type {
   PluginSidebarProject,
+  PluginSidebarPullRequest,
   PluginSidebarThread,
   PluginSidebarThreadActions,
   PluginSidebarThreadPullRequestState,
@@ -19,6 +20,10 @@ import {
   useEnvironmentPullRequest,
 } from "@/hooks/queries/environment-queries";
 import { useHosts } from "@/hooks/queries/host-queries";
+import {
+  getProjectComposeRoutePath,
+  getSettingsProjectRoutePath,
+} from "@/lib/route-paths";
 import { useSidebarNavigation } from "@/hooks/queries/sidebar-navigation-query";
 import { useUpdateThread } from "@/hooks/mutations/thread-state-mutations";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
@@ -78,6 +83,8 @@ export function useSidebarThreads(): PluginSidebarThreadsState {
         status: query.isError ? "error" : "loading",
         threads: EMPTY_THREADS,
         projects: EMPTY_PROJECTS,
+        experimental_archived: null,
+        sections: [],
       };
     }
     const allProjects = [...data.projects, data.personalProject];
@@ -92,7 +99,11 @@ export function useSidebarThreads(): PluginSidebarThreadsState {
         id: project.id,
         name: project.name,
         isPersonal: project.id === PERSONAL_PROJECT_ID,
+        href: getProjectComposeRoutePath(project.id),
+        settingsHref: getSettingsProjectRoutePath(project.id),
       })),
+      experimental_archived: null,
+      sections: [],
     };
   }, [data, hostNamesById, query.isError]);
 }
@@ -178,6 +189,18 @@ export function useSidebarThreadActions(): PluginSidebarThreadActions {
       archive(threadId) {
         hostActions.archiveThreadAndChildren(requireEntry(threadId));
       },
+      async experimental_archiveEnvironmentThreads(environmentId) {
+        for (const entry of entriesById.values()) {
+          if (entry.environmentId !== environmentId || entry.archivedAt !== null)
+            continue;
+          const parent =
+            entry.parentThreadId === null
+              ? undefined
+              : entriesById.get(entry.parentThreadId);
+          if (parent?.environmentId === environmentId) continue;
+          hostActions.archiveThreadAndChildren(entry);
+        }
+      },
       requestDelete(threadId) {
         hostActions.requestDelete(requireEntry(threadId));
       },
@@ -215,8 +238,49 @@ export function useSidebarThreadPullRequest(
               url: pullRequest.url,
               state: pullRequest.state,
               attention: pullRequest.attention,
+              ...pullRequestDetailsFromAttention(pullRequest.attention),
             },
     }),
     [environmentId, pullRequest, query.isPending],
   );
+}
+
+function pullRequestDetailsFromAttention(
+  attention: PluginSidebarPullRequest["attention"],
+): Pick<
+  PluginSidebarPullRequest,
+  | "experimental_autoMerge"
+  | "experimental_inMergeQueue"
+  | "experimental_checks"
+  | "experimental_review"
+  | "experimental_mergeability"
+> {
+  return {
+    experimental_autoMerge: false,
+    experimental_inMergeQueue: attention === "queued" ? true : null,
+    experimental_checks: {
+      state:
+        attention === "checks_failed"
+          ? "failing"
+          : attention === "checks_pending"
+            ? "pending"
+            : "unknown",
+    },
+    experimental_review: {
+      state:
+        attention === "changes_requested" || attention === "review_requested"
+          ? attention
+          : "none",
+    },
+    experimental_mergeability: {
+      state:
+        attention === "conflicts" ||
+        attention === "blocked" ||
+        attention === "draft"
+          ? attention
+          : attention === "ready_to_merge"
+            ? "mergeable"
+            : "unknown",
+    },
+  };
 }

@@ -9,6 +9,10 @@ import {
 } from "@cloudroom/shared-ui/resource-list";
 import { Switch } from "@cloudroom/shared-ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@cloudroom/shared-ui/toggle-group";
+import {
+  PluginSafeModeBanner,
+  PluginSafeModeButton,
+} from "@/components/plugin/management/PluginSafeMode";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { usePluginCatalogSearch } from "@/hooks/queries/plugin-catalog-queries";
 import {
@@ -124,19 +128,23 @@ export function BrowsePluginsTab({
           searchPlaceholder="Search plugins"
           onSearchChange={(value) => setParam("query", value)}
           controls={
-            <PluginFilterToggle
-              value={filter}
-              updateCount={updateCount}
-              onChange={(next) =>
-                setParam("view", next === "all" ? null : next)
-              }
-            />
+            <>
+              <PluginFilterToggle
+                value={filter}
+                updateCount={updateCount}
+                onChange={(next) =>
+                  setParam("view", next === "all" ? null : next)
+                }
+              />
+              <PluginSafeModeButton />
+            </>
           }
           action={actions}
         />
       }
     >
       <div className={cn("space-y-3 pb-8", PLUGINS_LIST_BAND_CLASSES)}>
+        <PluginSafeModeBanner />
         {catalogQuery.isError && rows.length > 0 ? (
           <p className="px-3 text-xs text-warning-text" role="status">
             The plugin catalog is not available. Showing installed plugins.

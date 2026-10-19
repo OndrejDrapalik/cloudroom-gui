@@ -14,8 +14,8 @@ async function askForMoreUsage() {
 
 export function CloudUsageLimitNotice() {
   const ask = useMutation({ mutationFn: askForMoreUsage });
-  const free = Boolean(useCloudroomAccount().data?.planUsage);
-  if (free) {
+  const plan = useCloudroomAccount().data?.planUsage?.plan;
+  if (plan === "free") {
     return (
       <PromptStackCard ariaLabel="Cloud usage limit" className="space-y-2 p-3 text-xs">
         <p className="text-sm font-medium">You hit the Free plan's cloud limit.</p>
@@ -29,10 +29,17 @@ export function CloudUsageLimitNotice() {
   return (
     <PromptStackCard ariaLabel="Cloud usage limit" className="space-y-2 p-3 text-xs">
       <p className="text-sm font-medium">You hit your plan's cloud limit.</p>
-      <p className="text-muted-foreground">Your messages are saved, and Local threads still work. Older usage stops counting after 30 days.</p>
-      {ask.isSuccess
-        ? <p role="status" className="text-muted-foreground">Sent. The Cloudroom team will reach out to set up a quick call.</p>
-        : <Button type="button" size="sm" disabled={ask.isPending} onClick={() => ask.mutate()}>Ask for more usage</Button>}
+      <p className="text-muted-foreground">Your messages are saved, and Local threads still work. {plan === "pro" ? "Super gives you 3× more cloud agents and compute." : "Older usage stops counting after 30 days."}</p>
+      <div className="flex flex-wrap items-center gap-2">
+        {plan === "pro" && (
+          <Button type="button" size="sm" onClick={() => openUrlInExternalBrowser("https://www.cloudroom.dev/billing")}>
+            Upgrade to Super<span className="font-normal opacity-70">$150/mo</span><Icon name="ArrowRight" aria-hidden />
+          </Button>
+        )}
+        {ask.isSuccess
+          ? <p role="status" className="text-muted-foreground">Sent. The Cloudroom team will reach out to set up a quick call.</p>
+          : <Button type="button" size="sm" variant={plan === "pro" ? "outline" : "default"} disabled={ask.isPending} onClick={() => ask.mutate()}>Ask for more usage</Button>}
+      </div>
       {ask.error && <p role="alert" className="text-destructive">{ask.error.message}</p>}
     </PromptStackCard>
   );

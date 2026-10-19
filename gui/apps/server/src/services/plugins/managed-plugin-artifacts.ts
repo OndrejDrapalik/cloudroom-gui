@@ -107,7 +107,6 @@ interface ManagedPluginArtifactsContext {
   deps: PluginServiceDeps;
   withArtifactLock: <T>(key: string, fn: () => Promise<T>) => Promise<T>;
   sourceKind: (source: string) => "path" | "git" | "npm" | "builtin";
-  checkEngineRange: (manifest: PluginManifest) => string | undefined;
   checkPluginSdkRange: (manifest: PluginManifest) => string | undefined;
   isPackagedBuiltinEntry: (args: {
     kind: "path" | "git" | "npm" | "builtin";
@@ -197,7 +196,6 @@ export function createManagedPluginArtifacts(
     deps,
     withArtifactLock,
     sourceKind,
-    checkEngineRange,
     checkPluginSdkRange,
     isPackagedBuiltinEntry,
     registerInstalled,
@@ -237,8 +235,7 @@ export function createManagedPluginArtifacts(
   }): Promise<PluginManifest> {
     const manifest = await readPluginManifest(args.rootDir);
     if (args.refuseEngineMismatch) {
-      const engineProblem =
-        checkEngineRange(manifest) ?? checkPluginSdkRange(manifest);
+      const engineProblem = checkPluginSdkRange(manifest);
       if (engineProblem) {
         throw new Error(
           `install refused: plugin "${manifest.id}" ${engineProblem}`,
@@ -616,7 +613,6 @@ export function createManagedPluginArtifacts(
       const manifest = await readPluginManifest(realRoot);
       assertExpectedPluginId(args.context, manifest.id, args.source);
       const compatibility = evaluateCompatibility({
-        bbRange: manifest.bbEngineRange,
         sdkRange: manifest.bbPluginSdkRange,
         appVersion: deps.appVersion,
       });
@@ -629,7 +625,6 @@ export function createManagedPluginArtifacts(
         : {
             outcome: "compatible",
             devMode: compatibility.devMode,
-            packagedBuildProblems: compatibility.packaged,
           };
     } catch (error) {
       return {
@@ -1099,7 +1094,6 @@ export function createManagedPluginArtifacts(
         outcome: "valid";
         manifest: PluginManifest;
         devMode: boolean;
-        packagedBuildProblems: CompatibilityProblem[];
         rootDir: string | null;
         artifactId: string | null;
       }
@@ -1154,7 +1148,6 @@ export function createManagedPluginArtifacts(
       );
       const manifest = await readPluginManifest(targetRealRoot);
       const compatibility = evaluateCompatibility({
-        bbRange: manifest.bbEngineRange,
         sdkRange: manifest.bbPluginSdkRange,
         appVersion: deps.appVersion,
       });
@@ -1186,7 +1179,6 @@ export function createManagedPluginArtifacts(
         outcome: "valid",
         manifest,
         devMode: compatibility.devMode,
-        packagedBuildProblems: compatibility.packaged,
         rootDir: targetRoot,
         artifactId: existingArtifact.id,
       };
@@ -1238,7 +1230,6 @@ export function createManagedPluginArtifacts(
         };
       }
       const compatibility = evaluateCompatibility({
-        bbRange: manifest.bbEngineRange,
         sdkRange: manifest.bbPluginSdkRange,
         appVersion: deps.appVersion,
       });
@@ -1326,7 +1317,6 @@ export function createManagedPluginArtifacts(
         outcome: "valid",
         manifest,
         devMode: compatibility.devMode,
-        packagedBuildProblems: compatibility.packaged,
         rootDir: args.promote ? targetRoot : null,
         artifactId,
       };

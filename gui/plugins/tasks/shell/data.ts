@@ -2,7 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRealtime, useRpc } from "@get-bb/plugin-sdk/app";
 import type { z } from "zod";
 import { tasksRpcContract, type TasksRpcContract } from "../shared/contract.js";
-import type { Task, TaskPriority, TaskStatus } from "../shared/contract.js";
+import type {
+  Task,
+  TaskMetadata,
+  TaskPriority,
+  TaskStatus,
+} from "../shared/contract.js";
 import { errorMessage } from "../shared/errors.js";
 import { TASKS_PAGE_MAX_LIMIT, type TaskSort } from "../shared/pagination.js";
 import type { MentionItem } from "../editor/extensions.js";
@@ -46,6 +51,24 @@ export async function listAllTasks(
     cursor = page.nextCursor ?? undefined;
   } while (cursor !== undefined);
   return tasks;
+}
+
+export async function loadTaskMetadata(
+  rpc: TasksRpc,
+  taskIds: readonly string[],
+): Promise<Map<string, TaskMetadata>> {
+  const metadata = new Map<string, TaskMetadata>();
+  for (
+    let offset = 0;
+    offset < taskIds.length;
+    offset += TASKS_PAGE_MAX_LIMIT
+  ) {
+    const page = await rpc.call("getTaskMetadata", {
+      taskIds: taskIds.slice(offset, offset + TASKS_PAGE_MAX_LIMIT),
+    });
+    for (const entry of page.metadata) metadata.set(entry.taskId, entry);
+  }
+  return metadata;
 }
 
 const INVALIDATION_CHANNELS = [

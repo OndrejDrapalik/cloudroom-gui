@@ -217,6 +217,14 @@ const taskPullRequestSchema = z
   })
   .strict();
 
+const taskMetadataSchema = z
+  .object({
+    taskId: idSchema,
+    activeThreads: z.array(taskThreadSchema),
+    attachmentCount: z.number().int().nonnegative(),
+  })
+  .strict();
+
 const presetSchema = z
   .object({
     id: idSchema,
@@ -602,6 +610,12 @@ export const tasksRpcContract = defineRpcContract({
     input: z.object({ taskId: idSchema }).strict(),
     output: z.object({ taskThreads: z.array(taskThreadSchema) }).strict(),
   },
+  getTaskMetadata: {
+    input: z
+      .object({ taskIds: z.array(idSchema).max(TASKS_PAGE_MAX_LIMIT) })
+      .strict(),
+    output: z.object({ metadata: z.array(taskMetadataSchema) }).strict(),
+  },
   listTaskPullRequests: {
     input: z.object({ taskId: idSchema }).strict(),
     output: z
@@ -741,6 +755,7 @@ export type CommentProvider = z.infer<typeof commentProviderSchema>;
 export type DisplayComment = z.infer<typeof displayCommentSchema>;
 export type Attachment = z.infer<typeof attachmentSchema>;
 export type TaskThread = z.infer<typeof taskThreadSchema>;
+export type TaskMetadata = z.infer<typeof taskMetadataSchema>;
 export type TaskPullRequest = z.infer<typeof taskPullRequestSchema>;
 export type Preset = z.infer<typeof presetSchema>;
 export type TasksDomainError = z.infer<typeof tasksDomainErrorSchema>;

@@ -84,10 +84,10 @@ export function InviteSidebarRow() {
   return (
     <div className="mt-2 border-t border-sidebar-border pt-2">
       <button type="button" onClick={() => open(true)} data-testid="settings-invite"
-        className="flex h-9 w-full items-center gap-2.5 rounded-md bg-[#bfff00]/30 px-2 text-sm font-semibold text-sidebar-foreground hover:bg-[#bfff00]/45 dark:bg-[#bfff00]/8 dark:hover:bg-[#bfff00]/15">
+        className="flex h-9 w-full items-center gap-2.5 rounded-md bg-primary/15 px-2 text-sm font-semibold text-sidebar-foreground hover:bg-primary/25 dark:bg-primary/8 dark:hover:bg-primary/15">
         <TicketIcon />
         Invite friends
-        {left > 0 && left <= 3 && <span className="ml-auto rounded bg-[#bfff00] px-1.5 py-0.5 text-xs font-bold text-[#0e0d0b] ring-1 ring-black/15 dark:ring-0">{left} left</span>}
+        {left > 0 && left <= 3 && <span className="ml-auto rounded bg-primary px-1.5 py-0.5 text-xs font-bold text-primary-foreground ring-1 ring-black/15 dark:ring-0">{left} left</span>}
       </button>
     </div>
   );
@@ -111,7 +111,7 @@ export function InviteSettingsCard() {
           {left} left
         </span>
       )}
-      <button type="button" onClick={() => open(true)} className="h-8 shrink-0 rounded-md bg-[#bfff00] px-3 text-xs font-semibold text-[#0e0d0b] hover:brightness-95">
+      <button type="button" onClick={() => open(true)} className="h-8 shrink-0 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:brightness-95">
         Invite a friend
       </button>
     </div>
@@ -332,5 +332,5 @@ function Primary({ children, onClick, disabled }: { children: ReactNode; onClick
 }
 
 const Arrow = () => <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 8h10M9 4l4 4-4 4" /></svg>;
-const TicketIcon = ({ className = "text-[#0e0d0b] dark:text-[#bfff00]" }: { className?: string }) => <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0", className)} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" /><path d="M13 5v2M13 11v2M13 17v2" /></svg>;
+const TicketIcon = ({ className = "text-primary" }: { className?: string }) => <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0", className)} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" /><path d="M13 5v2M13 11v2M13 17v2" /></svg>;
 const CopyIcon = () => <svg viewBox="0 0 16 16" className="size-4" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="5" y="5" width="8.5" height="8.5" /><path d="M2.5 10.5v-8h8" /></svg>;

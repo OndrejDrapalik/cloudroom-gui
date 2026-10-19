@@ -7,6 +7,7 @@ import {
   type PromptInput,
   type Thread,
   type ThreadQueuedMessage,
+  type ThreadTurnInitiator,
 } from "@cloudroom/domain";
 import type {
   ExecutionInputFieldSource,
@@ -98,6 +99,7 @@ export interface MessageDispatchHookPassRequest {
   originPluginId: string | null;
   startedOnBehalfOf: StartedOnBehalfOf | null;
   parentThreadId: string | null;
+  senderThreadId: string | null;
   /** The queued row being re-attempted; null for an inline first attempt. */
   queuedMessage: ThreadQueuedMessage | null;
   pluginSubmission: MessageDispatchHookContext["experimental_submission"];
@@ -278,6 +280,25 @@ export function dispatchInputText(input: readonly PromptInput[]): string {
     .join("\n");
 }
 
+function dispatchSenderThreadId(
+  request: MessageDispatchHookPassRequest,
+): string | null {
+  return (
+    request.queuedMessage?.senderThreadId ??
+    request.senderThreadId ??
+    request.startedOnBehalfOf?.senderThreadId ??
+    null
+  );
+}
+
+function dispatchInitiator(
+  request: MessageDispatchHookPassRequest,
+): ThreadTurnInitiator {
+  if (request.queuedMessage !== null) return request.queuedMessage.initiator;
+  if (request.senderThreadId !== null) return "agent";
+  return request.startedOnBehalfOf?.initiator ?? "user";
+}
+
 /**
  * The context every handler in a pass sees.
  *
@@ -314,6 +335,9 @@ function buildHookContext(
     originPluginId: request.originPluginId,
     startedOnBehalfOf: request.startedOnBehalfOf,
     parentThreadId: request.parentThreadId,
+    initiator: dispatchInitiator(request),
+    senderThreadId: dispatchSenderThreadId(request),
+    queuedMessages: request.queuedMessage === null ? [] : [request.queuedMessage],
     queuedMessage: request.queuedMessage,
     experimental_submission: request.pluginSubmission,
   };

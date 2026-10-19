@@ -174,6 +174,7 @@ interface AcpPendingTurnInput {
 
 interface AcpThreadSession {
   bbThreadId: string;
+  turnOutput: boolean;
   construction: AcpSessionParams;
   providerThreadId: string;
   cwd: string;
@@ -1703,6 +1704,7 @@ async function startAgentSession(
     ...withoutBridgeRuntimeEnv(process.env),
     ...params.envVars,
   };
+  await dialect.prepareLaunch?.(params.agent.command, childEnv);
   const connection = createAcpAgentConnection({
     command: params.agent.command,
     args: launch.args,
@@ -1731,6 +1733,7 @@ async function startAgentSession(
   });
   session = {
     bbThreadId,
+    turnOutput: false,
     construction: params,
     providerThreadId: "",
     cwd: params.cwd,
@@ -1796,7 +1799,10 @@ async function startAgentSession(
     );
     const sessionCapabilities =
       initializeResult.agentCapabilities?.sessionCapabilities;
-    const mcpServers = await buildSessionMcpServers(params);
+    const mcpServers =
+      dialect.sessionMcpServers === false
+        ? []
+        : await buildSessionMcpServers(params);
     const mcpServer = mcpServers[0];
     if (mcpServer) {
       session.cursorMcpApproval = await approveCursorSessionMcpServer({
@@ -1815,7 +1821,48 @@ async function startAgentSession(
     let sessionId: string | undefined;
     let loadedConfigOptions: readonly AcpConfigOption[] | undefined;
     let loadedModels: AcpSessionModels | undefined;
-    if (request.kind === "fork") {
+    const openSession =
+      request.kind === "fork" ? undefined : dialect.openSession;
+    if (openSession) {
+      const selection = params.modelSelection;
+      const opening = {
+        command: params.agent.command,
+        env: childEnv,
+        cwd: params.cwd,
+        fullAccess: params.permissionMode === "full",
+        ...(selection && "modelId" in selection
+          ? { model: selection.modelId, reasoningLevel: selection.reasoningLevel }
+          : {}),
+      };
+      const open = async (resumeId?: string) => {
+        const id = await openSession({
+          ...opening,
+          ...(resumeId === undefined ? {} : { resumeId }),
+        });
+        const state = await connection.request({
+          method: "session/resume",
+          params: { sessionId: id, cwd: params.cwd, mcpServers },
+          resultSchema: z.union([acpConfigStateResultSchema, z.null()]),
+        });
+        return { id, state };
+      };
+      let opened: Awaited<ReturnType<typeof open>> | undefined;
+      if (request.kind === "resume") {
+        try {
+          opened = await open(request.resumeProviderThreadId);
+        } catch (error) {
+          console.error(`ACP session restore failed for ${request.resumeProviderThreadId}; starting a new session:`, error);
+          emitStartNotification(ACP_WARNING_METHOD, {
+            threadId: bbThreadId,
+            summary: `${agentLabel} could not restore the previous session; continuing in a fresh session without in-agent history.`,
+          });
+        }
+      }
+      opened ??= await open();
+      sessionId = opened.id;
+      loadedConfigOptions = opened.state?.configOptions;
+      loadedModels = opened.state?.models;
+    } else if (request.kind === "fork") {
       const forkedSession = await connection.request({
         method: "session/fork",
         params: {
@@ -2161,11 +2208,18 @@ function finishTurn(
   });
 }
 
+const TURN_OUTPUT_UPDATES: ReadonlySet<string> = new Set([
+  "agent_message_chunk",
+  "agent_thought_chunk",
+  "tool_call",
+]);
+
 function runTurn(
   session: AcpThreadSession,
   firstInput: AcpPendingTurnInput,
 ): void {
   session.activePromptKind = "turn";
+  session.turnOutput = false;
   emitForSession(session, ACP_TURN_STARTED_METHOD, {
     threadId: session.bbThreadId,
   });
@@ -2230,6 +2284,17 @@ function runTurn(
         }
       }
 
+      const emptyTurnError = session.dialect.emptyTurnError;
+      if (
+        stopReason === "end_turn" &&
+        !session.turnOutput &&
+        emptyTurnError !== undefined
+      ) {
+        dropQueuedTurnInputs(session, "ACP turn ended before the steer was sent");
+        emitSessionError(session, emptyTurnError);
+        session.activePromptKind = null;
+        return;
+      }
       finishTurn(session, stopReason);
       return;
     }
@@ -2389,6 +2454,9 @@ function handleAgentNotification(
     return;
   }
   session.contextEstimate?.addUpdate(parsed.data.update);
+  if (TURN_OUTPUT_UPDATES.has(parsed.data.update.sessionUpdate)) {
+    session.turnOutput = true;
+  }
   if (session.activePromptKind === "compaction") {
     const chunk = acpAgentMessageChunkUpdateSchema.safeParse(
       parsed.data.update,
@@ -2470,10 +2538,15 @@ async function handleModelList(
     ? await loadAgentModelCatalog(params.listCommand)
     : null;
   if (catalog) {
+    const hidesModel = resolveAcpDialect({
+      ...(dialectId === undefined ? {} : { dialectId }),
+      command: params.listCommand?.command ?? "",
+    }).hidesModel;
+    const models = catalog.models.filter((model) => !hidesModel?.(model.id));
     sendModels(
       params.parameterizedModelPicker && dialectId === "cursor"
-        ? buildCursorParameterizedModelCatalog(catalog.models)
-        : catalog.models,
+        ? buildCursorParameterizedModelCatalog(models)
+        : models,
     );
     return;
   }

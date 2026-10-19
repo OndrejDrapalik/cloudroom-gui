@@ -13,7 +13,7 @@ import { TasksRefreshProvider } from "../../shell/refresh.js";
 import { PANEL_PATH, tasksRouteToSubPath } from "../../shell/routes.js";
 import { DetailView } from "../detail/index.js";
 import { PRIORITY_LABELS, STATUS_LABELS } from "../list/lib.js";
-import { PriorityIcon, StatusIcon } from "../list/icons.js";
+import { PriorityIcon, StatusIcon } from "../../components/task-icons.js";
 
 const TASK_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9]{0,9}-\d+$/;
 

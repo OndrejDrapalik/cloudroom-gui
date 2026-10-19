@@ -541,6 +541,7 @@ async function runDispatchAttempt(
       originPluginId: args.originPluginId,
       startedOnBehalfOf: args.startedOnBehalfOf,
       parentThreadId: thread.parentThreadId,
+      senderThreadId,
       queuedMessage:
         claimed === null ? null : toThreadQueuedMessage(claimed),
       pluginSubmission: args.pluginSubmission,

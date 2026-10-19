@@ -14,6 +14,7 @@ import {
   presetReasoningLevelSchema,
   presetServiceTierSchema,
   ULID_PATTERN,
+  type TaskMetadata,
 } from "../shared/contract.js";
 import type {
   Attachment,
@@ -1639,6 +1640,42 @@ export function createTasksStore(db: PluginDatabase) {
     return thread;
   }
 
+  function getTaskMetadata(taskIds: readonly string[]): TaskMetadata[] {
+    const metadata = new Map<string, TaskMetadata>(
+      taskIds.map((taskId) => [
+        taskId,
+        { taskId, activeThreads: [], attachmentCount: 0 },
+      ]),
+    );
+    if (taskIds.length === 0) return [];
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const threads = db
+      .prepare<string[], TaskThreadRow>(
+        `
+      SELECT * FROM task_threads
+      WHERE task_id IN (${placeholders}) AND live_status IN ('starting', 'working')
+      ORDER BY attached_at DESC, id DESC
+    `,
+      )
+      .all(...taskIds);
+    for (const thread of threads) {
+      metadata
+        .get(thread.task_id)!
+        .activeThreads.push(taskThreadFromRow(thread));
+    }
+    const counts = db
+      .prepare<string[], { task_id: string; count: number }>(
+        `
+      SELECT task_id, COUNT(*) AS count FROM attachments
+      WHERE task_id IN (${placeholders}) GROUP BY task_id
+    `,
+      )
+      .all(...taskIds);
+    for (const row of counts)
+      metadata.get(row.task_id)!.attachmentCount = row.count;
+    return [...metadata.values()];
+  }
+
   function listTaskThreads(taskId: string): TaskThread[] {
     return db
       .prepare<[string], TaskThreadRow>(
@@ -1854,6 +1891,7 @@ export function createTasksStore(db: PluginDatabase) {
     getTaskThreadByThreadId,
     listTaskThreadsByThreadId,
     listTaskThreads,
+    getTaskMetadata,
     updateTaskThreadStatus,
     deleteTaskThread,
     createPreset,

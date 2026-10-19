@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import semver from "semver";
-import { PLUGIN_SDK_VERSION } from "@cloudroom/domain";
-import { isPluginSdkRangeSatisfied } from "../../../src/services/plugins/sdk-compat.js";
+import { BB_APP_COMPAT_VERSION, PLUGIN_SDK_VERSION } from "@cloudroom/domain";
+import {
+  bbCompatAppVersion,
+  isPluginSdkRangeSatisfied,
+} from "../../../src/services/plugins/sdk-compat.js";
 
 const major = semver.major(PLUGIN_SDK_VERSION);
 
@@ -31,5 +34,15 @@ describe("isPluginSdkRangeSatisfied", () => {
     expect(isPluginSdkRangeSatisfied(`>=${PLUGIN_SDK_VERSION}`)).toBe(true);
     expect(isPluginSdkRangeSatisfied(PLUGIN_SDK_VERSION)).toBe(true);
     expect(isPluginSdkRangeSatisfied("*")).toBe(true);
+  });
+});
+
+describe("bbCompatAppVersion", () => {
+  it("reports the BB release that matches the SDK, not the bb-app package version", () => {
+    expect(bbCompatAppVersion("0.43.1")).toBe(BB_APP_COMPAT_VERSION);
+  });
+
+  it("keeps dev builds in dev mode", () => {
+    expect(bbCompatAppVersion("0.0.0-dev")).toBe("0.0.0-dev");
   });
 });

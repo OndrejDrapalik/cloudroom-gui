@@ -126,6 +126,19 @@ const FIRST_PARTY_PROVIDER_DECLARATIONS = [
   {
     builtinName: "provider-acp",
     pluginId: "provider-acp",
+    providerId: "acp-openclaw",
+    displayName: "OpenClaw",
+    supportsThreadArchive: false,
+    supportsThreadRename: false,
+    fork: "none",
+    supportsManualCompaction: false,
+    supportsUsage: false,
+    visibility: "installed",
+    hasLogo: true,
+  },
+  {
+    builtinName: "provider-acp",
+    pluginId: "provider-acp",
     providerId: "acp-devin",
     displayName: "Devin",
     supportsThreadArchive: false,
@@ -401,6 +414,7 @@ describe("first-party provider plugins", () => {
           "acp-grok",
           "acp-fx",
           "acp-hermes-agent",
+          "acp-openclaw",
           "acp-devin",
         ]);
         const infos = await listSystemProviderInfos(harness.deps, {});

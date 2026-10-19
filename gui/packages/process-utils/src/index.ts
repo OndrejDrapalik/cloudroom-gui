@@ -1,6 +1,7 @@
 export * from "./cli-locations.js";
 export * from "./event-loop-delay.js";
 export * from "./plugin-process-paths.js";
+export * from "./process-info.js";
 export * from "./socket-type-of-service.js";
 import type { ChildProcess, StdioOptions } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -196,6 +197,13 @@ export function killProcessGroup(args: KillProcessGroupArgs): void {
     } catch {}
   }
   args.child.kill(args.signal);
+}
+
+export function killPortableProcess(
+  child: ChildProcess,
+  signal: NodeJS.Signals,
+): void {
+  child.kill(signal);
 }
 
 export function isProcessGroupAlive(child: {

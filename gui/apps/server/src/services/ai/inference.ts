@@ -275,7 +275,7 @@ async function completeWithAiService<T extends TSchema>(
   args: InferenceCompleteArgs<T>,
 ): Promise<Static<T> | null> {
   const service = deps.aiServices.get(modelInfo.provider);
-  if (service === null || !service.kinds.includes("inference")) {
+  if (service === null || !service.kinds?.includes("inference")) {
     throw new ApiError(
       501,
       "not_configured",

@@ -45,6 +45,7 @@ import {
 import { useSidebarThreadSplit } from "./plugin-sidebar-split";
 import { useAppNavigationHost } from "./app-navigation-host";
 import { useCodeTheme } from "./plugin-code-theme";
+import { pluginSdkCompat } from "./plugin-sdk-compat";
 
 export const pluginSdkAppImplementation = installDeprecatedAliases(
   {
@@ -80,6 +81,7 @@ export const pluginSdkAppImplementation = installDeprecatedAliases(
     useSdk,
     experimental_useProviders: useProviders,
     experimental_useCodeTheme: useCodeTheme,
+    ...pluginSdkCompat,
   } satisfies PluginSdkApp,
   { experimental_UrlLink: "UrlLink" },
 );

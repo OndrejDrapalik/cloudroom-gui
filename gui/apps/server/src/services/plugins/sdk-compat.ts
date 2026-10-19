@@ -1,5 +1,5 @@
 import semver from "semver";
-import { PLUGIN_SDK_VERSION } from "@cloudroom/domain";
+import { BB_APP_COMPAT_VERSION, PLUGIN_SDK_VERSION } from "@cloudroom/domain";
 
 export function isPluginSdkRangeSatisfied(range: string): boolean {
   if (semver.validRange(range) === null) return false;
@@ -12,4 +12,10 @@ export function isPluginSdkRangeSatisfied(range: string): boolean {
 
 export function pluginSdkRangeProblem(range: string): string {
   return `requires Cloudroom plugin SDK ${range}, running SDK is ${PLUGIN_SDK_VERSION}`;
+}
+
+export function bbCompatAppVersion(appVersion: string): string {
+  return semver.coerce(appVersion)?.version === "0.0.0"
+    ? appVersion
+    : BB_APP_COMPAT_VERSION;
 }

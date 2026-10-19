@@ -26,11 +26,7 @@ export interface ConnectStatus extends TunnelStatus {
   signedIn: boolean;
 }
 
-export interface PhoneCode {
-  code: string;
-  expiresAt: number;
-  url: string;
-}
+export const PHONE_SETUP_URL = "https://www.cloudroom.dev/m";
 
 export const CONNECT_REALTIME_CHANNEL = "connect";
 

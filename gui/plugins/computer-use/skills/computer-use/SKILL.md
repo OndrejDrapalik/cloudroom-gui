@@ -45,7 +45,7 @@ come back as `screenshot_file` paths; read them with your image tool.
    - Bound huge trees with `max_elements` / `max_depth`.
 3. Act once, targeting an `element_token` (`element_index` no longer works):
    - `click '{"pid":PID,"element_token":"…"}'`
-   - `set_value` for fields, sliders, popups. `type_text` inserts text; `press_key` / `hotkey` for keys.
+   - `set_value` for fields, sliders, popups. If a dropdown's menu is still open after `set_value`, `press_key` escape. `type_text` inserts text; `press_key` / `hotkey` for keys.
    - `invoke_menu` for menu items. `scroll` targets an element or `x,y`.
    - Pixels (`x`,`y`) are the fallback for canvas, video, or custom UI. Use pixels of the latest screenshot of that same window. Never guess coordinates.
 4. Verify with a fresh `get_window_state`. A success reply alone proves nothing. `effect:"unverifiable"` means check the screenshot.

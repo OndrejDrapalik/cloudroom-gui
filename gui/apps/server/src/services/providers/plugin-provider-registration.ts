@@ -2,6 +2,7 @@ import {
   EMPTY_PROVIDER_NATIVE_ROOTS,
   isNamespacedGlyph,
   isPluginOwnedIconPath,
+  reasoningLevelSchema,
 } from "@cloudroom/domain";
 import type { NormalizedPluginProviderDeclaration } from "@get-bb/plugin-sdk/internal/host-policy";
 import type {
@@ -98,13 +99,17 @@ export function projectFallbackModels(
     model: model.id,
     displayName: model.displayName,
     description: model.description,
-    supportedReasoningEfforts: model.supportedReasoningEfforts.map(
-      (effort) => ({
-        reasoningEffort: effort.reasoningEffort,
-        description: effort.description,
-      }),
+    supportedReasoningEfforts: model.supportedReasoningEfforts.flatMap(
+      (effort) => {
+        const level = reasoningLevelSchema.safeParse(effort.reasoningEffort);
+        return level.success
+          ? [{ reasoningEffort: level.data, description: effort.description }]
+          : [];
+      },
     ),
-    defaultReasoningEffort: model.defaultReasoningEffort,
+    defaultReasoningEffort:
+      reasoningLevelSchema.safeParse(model.defaultReasoningEffort).data ??
+      "medium",
     isDefault: model.isDefault,
   }));
 }

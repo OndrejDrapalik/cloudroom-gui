@@ -224,7 +224,7 @@ export function registerSystemRoutes(
         services: deps.aiServices.list().map((service) => ({
           id: service.id,
           displayName: service.displayName,
-          kinds: [...service.kinds],
+          kinds: [...(service.kinds ?? [])],
           pluginId: service.pluginId,
         })),
       },

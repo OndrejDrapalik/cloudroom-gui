@@ -243,6 +243,13 @@ added/updated/unchanged counts.
                                  Exits 1 when a plugin does not come up on
                                  them (previous instance kept, or degraded
                                  because a service ignored its abort)
+  room-cli plugin safe-mode [on|off]   Show or change safe mode. `on` stops every
+                                 plugin that doesn't ship with Cloudroom
+                                 (official catalog plugins included) without
+                                 changing its enabled setting. `off` restarts
+                                 the ones that were enabled and exits 1 if any
+                                 fail to start. Installs and updates of stopped
+                                 plugins are refused until it is off
   room-cli plugin config <id> [set <key> <value> | unset <key>]
                                  Show or change a plugin's declared settings
   room-cli plugin logs <id> [-n N] [-f]  Print (or follow) a plugin's bb.log output

@@ -1,11 +1,11 @@
 export const defaultThemeCss = `
 :root, .light {
-  --border: color-mix(in oklab, var(--primary) 30%, var(--canvas));
-  --border-hairline: color-mix(in oklab, var(--primary) 32%, var(--canvas));
-  --border-seam: color-mix(in oklab, var(--primary) 26%, var(--canvas));
-  --sidebar-border: color-mix(in oklab, var(--primary) 30%, var(--canvas));
-  --input: color-mix(in oklab, var(--primary) 55%, var(--canvas));
-  --timeline-accent: color-mix(in oklab, var(--primary) 80%, var(--ink));
+  --border: color-mix(in oklab, var(--primary) 35%, var(--canvas));
+  --border-hairline: color-mix(in oklab, var(--primary) 38%, var(--canvas));
+  --border-seam: color-mix(in oklab, var(--primary) 30%, var(--canvas));
+  --sidebar-border: color-mix(in oklab, var(--primary) 35%, var(--canvas));
+  --input: color-mix(in oklab, var(--primary) 80%, var(--canvas));
+  --timeline-accent: var(--primary);
   --file-accent: var(--timeline-accent);
 }
 .dark {
@@ -17,11 +17,12 @@ export const defaultThemeCss = `
   --timeline-accent: var(--primary);
   --file-accent: var(--timeline-accent);
 }
-:root:not(.dark) {
-  --primary-text: var(--ink);
-  --ring: var(--ink);
+:root:not(.dark), .light {
+  --primary: #457500;
+  --primary-foreground: #ffffff;
+  --primary-text: #3d5600;
+  --ring: var(--primary);
   --sidebar-ring: var(--ring);
-  --input: color-mix(in oklab, var(--ink) 55%, var(--canvas));
-  --timeline-accent: var(--ink);
+  --skill-mention-foreground: var(--primary);
 }
 `;

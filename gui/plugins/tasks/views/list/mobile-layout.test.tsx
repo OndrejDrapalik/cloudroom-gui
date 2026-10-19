@@ -83,7 +83,15 @@ function renderList() {
         sidebarSummary: () => ({ projects: [] }),
         listLabels: () => ({ labels }),
         listTasks: () => ({ tasks: [busyTask] }),
-        listTaskThreads: () => ({ taskThreads: [workerThread] }),
+        getTaskMetadata: () => ({
+          metadata: [
+            {
+              taskId: busyTask.id,
+              activeThreads: [workerThread],
+              attachmentCount: 0,
+            },
+          ],
+        }),
         listComments: () => ({ comments: [] }),
         listAttachments: () => ({ attachments: [] }),
       },

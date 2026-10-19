@@ -906,6 +906,9 @@ export function registerHandlers(
     listTaskThreads(input) {
       return { taskThreads: store.tasks.listTaskThreads(input.taskId) };
     },
+    getTaskMetadata(input) {
+      return { metadata: store.tasks.getTaskMetadata(input.taskIds) };
+    },
     async listTaskPullRequests(input) {
       return listTaskPullRequests(bb, store, input.taskId);
     },

@@ -242,6 +242,37 @@ export const KNOWN_ACP_AGENTS: readonly AcpAgentDefinition[] = [
     nativeRootsResolver: resolveHermesNativeRoots,
   },
   {
+    id: "acp-openclaw",
+    displayName: "OpenClaw",
+    icon: declaredIcon("openclaw"),
+    signInCommand: "openclaw onboard --install-daemon",
+    installUrl: "https://openclaw.ai",
+    installer: {
+      scriptUrl: "https://openclaw.ai/install.sh",
+      args: ["--no-onboard"],
+    },
+    visibility: "installed",
+    dialect: "openclaw",
+    fork: "none",
+    reasoningLevels: ["low", "medium", "high", "xhigh", "max"],
+    launch: {
+      displayName: "OpenClaw",
+      command: "openclaw",
+      args: ["acp", "--no-prefix-cwd"],
+      env: { OPENCLAW_HIDE_BANNER: "1", OPENCLAW_SUPPRESS_NOTES: "1" },
+      modelCli: { listArgs: ["models", "list", "--plain"], primaryModels: [] },
+      nativeReasoning: {
+        configId: "thought_level",
+        supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+        defaultLevel: "medium",
+      },
+      nativeSkillRoots: {
+        user: plainRoots([".agents/skills", ".openclaw/skills"]),
+        project: ancestorRoots([".agents/skills"]),
+      },
+    },
+  },
+  {
     id: "acp-devin",
     displayName: "Devin",
     icon: declaredIcon("devin"),

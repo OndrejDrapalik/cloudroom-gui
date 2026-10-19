@@ -4,7 +4,10 @@
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { ComposerView, PluginComposerScope } from "@get-bb/plugin-sdk/app";
+import type {
+  PluginComposerApi,
+  PluginComposerScope,
+} from "@get-bb/plugin-sdk/app";
 
 // jsdom omits this browser method; Radix uses it when opening the time picker.
 if (!Element.prototype.scrollIntoView) {
@@ -29,18 +32,17 @@ function composerView(overrides: {
   isEmpty?: boolean;
   attachmentCount?: number;
   isSubmitting?: boolean;
-}): ComposerView {
+}): PluginComposerApi {
   const text = overrides.text ?? "ship the release notes";
   return {
     scope: overrides.scope ?? { kind: "thread", threadId: "thr_scope" },
     layout: "expanded",
-    draft: {
-      text,
-      isEmpty: overrides.isEmpty ?? text.trim() === "",
-      attachmentCount: overrides.attachmentCount ?? 0,
-    },
-    run: { isRunning: false, isSubmitting: overrides.isSubmitting ?? false },
-  };
+    text,
+    isEmpty: overrides.isEmpty ?? text.trim() === "",
+    attachmentCount: overrides.attachmentCount ?? 0,
+    isRunning: false,
+    isSubmitting: overrides.isSubmitting ?? false,
+  } as Partial<PluginComposerApi> as PluginComposerApi;
 }
 
 function openPicker(
@@ -101,7 +103,9 @@ describe("registration", () => {
   });
 
   it("disables the row when there is no draft to schedule", () => {
-    const disabled = plusMenuItem.disabled as (view: ComposerView) => boolean;
+    const disabled = plusMenuItem.disabled as (
+      composer: PluginComposerApi,
+    ) => boolean;
     expect(disabled(composerView({ text: "" }))).toBe(true);
     expect(disabled(composerView({ isSubmitting: true }))).toBe(true);
     expect(disabled(composerView({}))).toBe(false);

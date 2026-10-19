@@ -13,6 +13,7 @@ async function createRuntime() {
   const db = createConnection(":memory:");
   migrate(db);
   return createPluginRuntime({
+    includedBuiltinNames: new Set(),
     machineEnrollments: null,
     deps: {
       db,

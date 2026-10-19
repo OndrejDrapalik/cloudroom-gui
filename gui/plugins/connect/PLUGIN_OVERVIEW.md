@@ -3,13 +3,13 @@ Cloudroom Connect opens Cloudroom from your phone or another computer, at a priv
 ## What you get
 
 - Remote access through an outbound tunnel. No router changes or open inbound ports.
-- One-code setup: open cloudroom.dev/mobile on your phone and enter the code from Settings → Cloudroom Connect. No extra account or login.
+- Phone setup: open cloudroom.dev/m on your phone and sign in with your Cloudroom account. The app runs at `app.cloudroom.run` ([ADR 0268](../../../docs/adr/0268-one-phone-app-set-up-at-cloudroom-dev-m.md)).
 - Port shares for local HTTP servers, open only on your signed-in phones and browsers.
 - The Cloudroom mobile app: after signing in, use Add to Home Screen or Install app. This is the PWA, not BB's native mobile app.
 
 ## Setup and commands
 
-Connect registers this Mac by itself once you are signed in to Cloudroom. Get a phone code in Settings → Cloudroom Connect, or run `room-cli connect phone-code`. Phones stay signed in until `room-cli connect sign-out-phones` or Sign out all phones. Disable the plugin to stop remote access.
+Connect registers this Mac by itself once you are signed in to Cloudroom. Settings → Cloudroom Connect shows a QR code for cloudroom.dev/m, and `room-cli connect phone` prints the link. Phones stay signed in until `room-cli connect sign-out-phones` or Sign out all phones. Disable the plugin to stop remote access.
 
 Agents use `room-cli connect expose <port>` to share previews. Inspect with `room-cli connect status` and `room-cli connect shares`; stop a share with `room-cli connect unexpose <port>`.
 

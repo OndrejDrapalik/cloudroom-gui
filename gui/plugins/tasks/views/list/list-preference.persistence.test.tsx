@@ -174,6 +174,7 @@ function baseRpc(overrides: Record<string, unknown> = {}) {
       return { tasks: next };
     },
     listTaskThreads: () => ({ taskThreads: [] }),
+    getTaskMetadata: () => ({ metadata: [] }),
     listComments: () => ({ comments: [] }),
     listAttachments: () => ({ attachments: [] }),
     ...overrides,

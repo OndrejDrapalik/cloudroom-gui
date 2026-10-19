@@ -42,7 +42,7 @@ function voiceService(
   modelInfo: ProviderModelInfo,
 ): AiServiceRegistration | null {
   const service = deps.aiServices.get(modelInfo.provider);
-  return service !== null && service.kinds.includes("voice") ? service : null;
+  return service !== null && service.kinds?.includes("voice") === true ? service : null;
 }
 
 function isPrimaryHostConnected(deps: LoggedWorkSessionDeps): boolean {

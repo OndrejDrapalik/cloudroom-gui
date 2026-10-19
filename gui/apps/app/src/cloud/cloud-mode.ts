@@ -1,6 +1,18 @@
 export const isPhoneRelay = () =>
   window.location.hostname.endsWith(".cloudroom.run");
 
+export const isPhoneApp = () => window.location.hostname === "app.cloudroom.run";
+
+export async function openMacOnPhone(handle: string): Promise<void> {
+  const response = await fetch("/__mac", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ handle }),
+  });
+  if (!response.ok) throw new Error("Couldn't open that Mac.");
+  window.location.reload();
+}
+
 export async function macOffline(timeoutMs = 4000): Promise<boolean> {
   const response = await fetch("/api/v1/system/version", {
     cache: "no-store",

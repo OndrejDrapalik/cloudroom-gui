@@ -57,8 +57,8 @@ export const sendMessageModeSchema = z.enum([
   "steer",
 ]);
 
-export const threadCreateOriginSchema = z.enum(["app", "cli", "sdk", "plugin"]);
-export type ThreadCreateOrigin = z.infer<typeof threadCreateOriginSchema>;
+export { threadCreateOriginSchema, type ThreadCreateOrigin } from "@cloudroom/domain";
+import { threadCreateOriginSchema } from "@cloudroom/domain";
 
 export const executionInputFieldSourceSchema = callerExecutionInputSourceSchema;
 export type ExecutionInputFieldSource = CallerExecutionInputSource;

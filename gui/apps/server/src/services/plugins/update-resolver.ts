@@ -17,7 +17,7 @@ export type NpmSpecKind = "default" | "exact" | "tag" | "range";
 export type GitRefKind = "branch" | "tag" | "commit";
 
 export interface CompatibilityProblem {
-  engine: "bb" | "bbPluginSdk";
+  engine: "bbPluginSdk";
   required: string;
   actual: string;
   message: string;
@@ -34,7 +34,6 @@ interface ResolutionFlags {
     version: PluginResolvedUpdateVersion;
     reasons: CompatibilityProblem[];
   };
-  packagedBuildProblems?: CompatibilityProblem[];
 }
 
 export type PluginUpdateResolution =
@@ -203,13 +202,13 @@ function allowedNpmVersions(
     .sort(semver.rcompare);
 }
 
+// engines.bb is BB's app version, which Cloudroom doesn't have, so only the
+// plugin SDK range gates compatibility.
 export function evaluateCompatibility(args: {
-  bbRange: string | undefined;
   sdkRange: string | undefined;
   appVersion: string;
 }): {
   effective: CompatibilityProblem[];
-  packaged: CompatibilityProblem[];
   devMode: boolean;
 } {
   const appVersion = semver.coerce(args.appVersion);
@@ -217,24 +216,6 @@ export function evaluateCompatibility(args: {
     throw new Error(`cannot parse running Cloudroom version "${args.appVersion}"`);
   }
   const devMode = appVersion.version === "0.0.0";
-  const bbProblems: CompatibilityProblem[] = [];
-  if (args.bbRange !== undefined) {
-    if (semver.validRange(args.bbRange) === null) {
-      bbProblems.push({
-        engine: "bb",
-        required: args.bbRange,
-        actual: appVersion.version,
-        message: `declares invalid engines.bb range ${JSON.stringify(args.bbRange)}`,
-      });
-    } else if (!semver.satisfies(appVersion, args.bbRange)) {
-      bbProblems.push({
-        engine: "bb",
-        required: args.bbRange,
-        actual: appVersion.version,
-        message: `requires Cloudroom ${args.bbRange}, running Cloudroom is ${appVersion.version}`,
-      });
-    }
-  }
   const sdkProblems: CompatibilityProblem[] = [];
   if (args.sdkRange !== undefined) {
     if (semver.validRange(args.sdkRange) === null) {
@@ -253,11 +234,7 @@ export function evaluateCompatibility(args: {
       });
     }
   }
-  return {
-    effective: devMode ? sdkProblems : [...bbProblems, ...sdkProblems],
-    packaged: bbProblems,
-    devMode,
-  };
+  return { effective: sdkProblems, devMode };
 }
 
 function npmDisplay(packageName: string, version: string): string {
@@ -276,7 +253,6 @@ export async function selectNpmCandidate(args: {
         candidate: NpmResolvedCandidate;
         reasons: CompatibilityProblem[];
       };
-      packagedBuildProblems: CompatibilityProblem[];
       devMode: boolean;
     }
   | {
@@ -331,7 +307,6 @@ export async function selectNpmCandidate(args: {
       },
     };
     const problems = evaluateCompatibility({
-      bbRange: candidate.engines.bb,
       sdkRange: candidate.engines.bbPluginSdk,
       appVersion: args.appVersion,
     });
@@ -345,7 +320,6 @@ export async function selectNpmCandidate(args: {
       outcome: "selected",
       candidate,
       ...(blocked ? { blocked } : {}),
-      packagedBuildProblems: problems.packaged,
       devMode: problems.devMode,
     };
   }
@@ -403,9 +377,6 @@ export async function resolveNpmUpdate(args: {
             reasons: selected.blocked.reasons,
           },
         }
-      : {}),
-    ...(selected.packagedBuildProblems.length > 0
-      ? { packagedBuildProblems: selected.packagedBuildProblems }
       : {}),
   };
   if (selected.candidate.version === args.current.version) {
@@ -595,7 +566,6 @@ export type GitCandidateProbeResult =
   | {
       outcome: "compatible";
       devMode: boolean;
-      packagedBuildProblems: CompatibilityProblem[];
     }
   | {
       outcome: "incompatible";
@@ -686,9 +656,6 @@ async function resolveGitRangeUpdate(args: {
       candidateGitTag: candidate.tag,
       ...(blocked ? { blocked } : {}),
       ...(probed.devMode ? { devMode: true } : {}),
-      ...(probed.packagedBuildProblems.length > 0
-        ? { packagedBuildProblems: probed.packagedBuildProblems }
-        : {}),
     };
   }
   if (blocked !== undefined) {

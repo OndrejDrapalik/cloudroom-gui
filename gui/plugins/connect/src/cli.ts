@@ -3,7 +3,7 @@ import type { ShareHostResolver } from "./hosts.js";
 import { parseSharePort } from "./shares.js";
 import type { ConnectTunnel } from "./tunnel.js";
 import type { PhoneRelay } from "./phone.js";
-import type { ConnectStatus } from "./types.js";
+import { PHONE_SETUP_URL, type ConnectStatus } from "./types.js";
 
 interface ParsedFlags {
   flags: Map<string, string | true>;
@@ -59,17 +59,17 @@ function validateFlags(
 
 function helpText(): string {
   return [
-    "Cloudroom Connect opens this Cloudroom from your phone at https://<id>.cloudroom.run.",
+    "Cloudroom Connect opens this Cloudroom from your phone at https://app.cloudroom.run.",
     "It sets itself up once you are signed in to Cloudroom. Share HTTP ports from any enrolled host.",
     "",
     "  room-cli connect status              Show remote-access status",
-    "  room-cli connect phone-code          Get a one-time code for cloudroom.dev/mobile",
+    "  room-cli connect phone               Show how to set up Cloudroom on your phone",
     "  room-cli connect sign-out-phones     Sign out every phone and browser",
     "  room-cli connect expose <port> [--host <name-or-id>]    Share a port from the thread's host",
     "  room-cli connect unexpose <port> [--host <name-or-id>]  Stop sharing a port on that host",
     "  room-cli connect shares [--host <name-or-id>]           List shares for the thread's host",
     "",
-    "On your phone, open cloudroom.dev/mobile and enter the code, then add it to your home screen.",
+    "On your phone, open cloudroom.dev/m, sign in, and add the app to your home screen.",
   ].join("\n");
 }
 
@@ -123,9 +123,9 @@ export function registerConnectCli(args: {
         usage: "room-cli connect status [--json]",
       },
       {
-        name: "phone-code",
-        summary: "Get a one-time code for cloudroom.dev/mobile",
-        usage: "room-cli connect phone-code [--json]",
+        name: "phone",
+        summary: "Show how to set up Cloudroom on your phone",
+        usage: "room-cli connect phone [--json]",
       },
       {
         name: "sign-out-phones",
@@ -163,15 +163,14 @@ export function registerConnectCli(args: {
               : `${formatStatus(current)}\n`,
           };
         }
-        if (first === "phone-code") {
+        if (first === "phone") {
           const parsed = parseFlags(argv.slice(1));
           validateFlags(parsed, { boolean: ["json"] });
-          const code = await phone.phoneCode();
           return {
             exitCode: 0,
             stdout: parsed.flags.has("json")
-              ? asJson(code)
-              : `Code: ${code.code}\nOn your phone, open cloudroom.dev/mobile and enter it, or open ${code.url}\nIt works once, for 10 minutes.\n`,
+              ? asJson({ url: PHONE_SETUP_URL })
+              : `On your phone, open ${PHONE_SETUP_URL}, sign in with your Cloudroom account, and tap Open Cloudroom.\nThen add it to your home screen.\n`,
           };
         }
         if (first === "sign-out-phones") {

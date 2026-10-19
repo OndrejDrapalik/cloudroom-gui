@@ -13,6 +13,7 @@ import { usePortalScopeProps } from "@cloudroom/shared-ui/lib/portal-scope";
 import { useBrowserDimmingOverlay } from "@/hooks/useBrowserDimmingModal";
 import { getBbDesktopInfo } from "@/lib/bb-desktop";
 import { Icon } from "@cloudroom/shared-ui/icon";
+import { useImageLightboxZoom } from "./image-lightbox-zoom";
 
 type ImageLightboxKeyAction = "close" | "next" | "previous";
 
@@ -129,6 +130,7 @@ export function ImageLightbox({
     panelRef,
     requestClose,
   });
+  const zoom = useImageLightboxZoom(panelRef, isVisible ? imageSrc : null);
   const hasNavigation =
     hasMultipleImages && onPrevious !== undefined && onNext !== undefined;
 
@@ -190,11 +192,12 @@ export function ImageLightbox({
       aria-modal="true"
       aria-labelledby={titleId}
       tabIndex={-1}
-      className="fixed inset-0 z-50 flex h-dvh w-full cursor-zoom-out items-center justify-center bg-black/70 p-4 outline-none animate-in fade-in-0 duration-150 motion-reduce:animate-none"
+      className="fixed inset-0 z-50 flex h-dvh w-full cursor-zoom-out items-center overflow-hidden justify-center bg-black/70 p-4 outline-none animate-in fade-in-0 duration-150 motion-reduce:animate-none"
       onClick={(event) => {
+        if (zoom.consumeDragClick()) return;
         if (
           event.target === event.currentTarget ||
-          event.target instanceof HTMLImageElement
+          (event.target instanceof HTMLImageElement && !zoom.isZoomed)
         ) {
           onClose();
         }
@@ -205,10 +208,13 @@ export function ImageLightbox({
       </h2>
       {imageSrc ? (
         <img
+          ref={zoom.imageRef}
           src={imageSrc}
           alt={imageAlt}
-          style={IMAGE_TRANSPARENCY_CHECKER_STYLE}
+          draggable={zoom.isZoomed ? false : undefined}
+          style={{ ...IMAGE_TRANSPARENCY_CHECKER_STYLE, ...zoom.imageStyle }}
           className="max-h-[82dvh] max-w-full object-contain"
+          {...zoom.imageHandlers}
         />
       ) : (
         <div

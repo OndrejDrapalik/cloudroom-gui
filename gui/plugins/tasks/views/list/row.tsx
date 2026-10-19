@@ -3,11 +3,11 @@ import type {
   Label,
   Project,
   Task,
+  TaskMetadata,
   TaskThread,
 } from "../../shared/contract.js";
 import { Icon } from "@cloudroom/shared-ui/icon";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
-import type { TaskRowMeta } from "./data.js";
 import { activeWorkLabel, formatDueDate, partitionLabels } from "./lib.js";
 import type { EditFn } from "./property-menus.js";
 import {
@@ -94,7 +94,7 @@ function LabelChips({
 
 interface TaskRowProps {
   task: Task;
-  meta: TaskRowMeta | undefined;
+  meta: TaskMetadata | undefined;
   project: Project | undefined;
   showProject: boolean;
   labelsById: Map<string, Label>;

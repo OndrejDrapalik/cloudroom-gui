@@ -2,6 +2,7 @@ import type {
   PluginRpcDiscoveryQuery,
   PublishedPluginRpcMethod,
 } from "@cloudroom/server-contract";
+import type { PluginRpcCallerResolution } from "./plugin-rpc-caller.js";
 import { watch } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -24,6 +25,7 @@ import {
   type ToolCallResponse,
 } from "@cloudroom/domain";
 import {
+  type ExperimentalPluginRpcCaller,
   type ExperimentalPluginWebSocketContext,
   type ExperimentalPluginWebSocketHandlers,
   type PluginCliExecutionResult,
@@ -57,6 +59,7 @@ import {
   ROOT_PLUGIN_SOURCE_SELECTION,
   type InstalledPlugin,
   type PluginCapabilitySummary,
+  type PluginSafeModeUpdateResponse,
   type PluginSourceDetail,
   type PluginSourceSelection,
   type PluginUpdateCheckEntry,
@@ -67,6 +70,7 @@ import {
   deleteInstalledPlugin,
   deletePluginSchedules,
   getInstalledPlugin,
+  getPluginSafeMode,
   getThread,
   getLatestThreadSequence,
   listDuePluginSchedules,
@@ -78,6 +82,7 @@ import {
   markInstalledPluginRemoved,
   recordPluginScheduleResult,
   setInstalledPluginEnabled,
+  setPluginSafeMode,
   type InstalledPluginRow,
   type PluginMarketplaceRow,
 } from "@cloudroom/db";
@@ -270,6 +275,8 @@ export interface PluginService {
     enabled: boolean,
   ): Promise<InstalledPlugin | undefined>;
   reload(id?: string): Promise<PluginReloadOutcome>;
+  getSafeMode(): boolean;
+  setSafeMode(enabled: boolean): Promise<PluginSafeModeUpdateResponse>;
   getApi(id: string): BbPluginApi | undefined;
   /**
    * Whether this plugin's runtime is live right now. Core uses it to decide
@@ -327,6 +334,7 @@ export interface PluginService {
   ): PluginWireLookup<PluginWebSocketRouteRecord>;
   discoverRpc(query: PluginRpcDiscoveryQuery): PublishedPluginRpcMethod[];
   getRpcHandler(id: string, method: string): PluginWireLookup<PluginRpcHandler>;
+  resolveRpcCaller(token: string | undefined): PluginRpcCallerResolution;
   invokeHttpRoute(
     id: string,
     route: PluginHttpRouteRecord,
@@ -351,6 +359,7 @@ export interface PluginService {
     method: string,
     handler: PluginRpcHandler,
     input: unknown,
+    caller: ExperimentalPluginRpcCaller,
   ): Promise<
     { ok: true; result: JsonValue } | { ok: false; error: PluginRpcError }
   >;
@@ -570,9 +579,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     agentToolProblems,
     appBundles,
     bindSdk: bindRuntimeSdk,
+    resolveRpcCaller,
     buildThreadDto,
     builtinSourceWatchers,
-    checkEngineRange,
     checkPluginSdkRange,
     disposeAll,
     disposeOne,
@@ -586,6 +595,8 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     identities,
     invokeWrapped,
     isBuiltinPluginId,
+    isSafeModeExemptRow,
+    isSuppressedBySafeMode,
     listPluginHooks,
     listPluginEnvironmentCompositions,
     listPluginEnvironmentProviders,
@@ -598,6 +609,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     loaded,
     loadOne,
     brandingAssets,
+    safeModeActivationRefusal,
     setDevBuildProblem,
     setStatus,
     sourceKind,
@@ -610,6 +622,11 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     withPluginOperationLock,
   } = createPluginRuntime({
     deps,
+    includedBuiltinNames: new Set(
+      bundledPlugins
+        .filter((plugin) => plugin.autoInstall)
+        .map((plugin) => plugin.name),
+    ),
     machineEnrollments: deps.machineEnrollments ?? null,
     settingsChanged: notifyPluginsChanged,
   });
@@ -634,6 +651,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     sourceFingerprint,
   } = createPluginRegistration({
     runInstallHandlers,
+    safeModeActivationRefusal,
     deps,
     bundledPlugins,
     withLifecycleLock,
@@ -641,7 +659,6 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     loadOne,
     statuses,
     validateInstallDir: (args) => managedValidateInstallDir(args),
-    checkEngineRange,
     checkPluginSdkRange,
     syncCliSkill,
     notifyPluginsChanged,
@@ -678,7 +695,6 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
     deps,
     withArtifactLock,
     sourceKind,
-    checkEngineRange,
     checkPluginSdkRange,
     isPackagedBuiltinEntry,
     registerInstalled,
@@ -691,6 +707,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
 
   const pluginUpdates = createPluginUpdates({
     deps,
+    safeModeActivationRefusal,
     registrationMutationKey: REGISTRATION_MUTATION_KEY,
     withLifecycleLock,
     withPluginOperationLock,
@@ -1596,6 +1613,33 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       });
     },
 
+    getSafeMode() {
+      return getPluginSafeMode(deps.db);
+    },
+
+    async setSafeMode(enabled) {
+      return withPluginOperationLock(REGISTRATION_MUTATION_KEY, async () => {
+        if (getPluginSafeMode(deps.db) === enabled) {
+          return { enabled, problems: [] };
+        }
+        setPluginSafeMode(deps.db, enabled);
+        const rows = listInstalledPlugins(deps.db)
+          .filter((row) => row.enabled && !isSafeModeExemptRow(row))
+          .sort((a, b) => a.id.localeCompare(b.id));
+        const problems: string[] = [];
+        for (const row of rows) {
+          const problem = await withLifecycleLock(row.id, () => loadOne(row));
+          if (problem !== null) {
+            problems.push(`plugin "${row.id}" did not start: ${problem}`);
+          }
+          if (enabled) deps.onPluginUnregistered?.(row.id);
+        }
+        await syncCliSkill();
+        notifyPluginsChanged();
+        return { enabled, problems };
+      });
+    },
+
     async reload(id) {
       const rows = listInstalledPlugins(deps.db).filter(
         (row) => id === undefined || row.id === id,
@@ -1605,6 +1649,10 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
         const problem = await withLifecycleLock(row.id, () => loadOne(row));
         if (problem !== null) {
           failures.push(`plugin "${row.id}" reload failed: ${problem}`);
+        } else if (isSuppressedBySafeMode(row)) {
+          failures.push(
+            `plugin "${row.id}" was not reloaded: plugin safe mode is on`,
+          );
         }
       }
       await syncCliSkill();
@@ -1812,6 +1860,8 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       return wireLookup(id, (plugin) => plugin.handle.rpcHandlers.get(method));
     },
 
+    resolveRpcCaller,
+
     async invokeHttpRoute(id, route, context) {
       usage.record(id, "ui");
       const outcome = await invokeWrapped(
@@ -1867,7 +1917,7 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
       await invokeWrapped(id, `websocket ${route.path} ${event}`, run);
     },
 
-    async invokeRpcHandler(id, method, handler, input) {
+    async invokeRpcHandler(id, method, handler, input, caller) {
       usage.record(id, "ui");
       const outcome = await invokeWrapped(id, `rpc ${method}`, async () => {
         const parsedInput = await validateRpcValue(
@@ -1876,7 +1926,9 @@ export function createPluginService(deps: PluginServiceDeps): PluginService {
           "input",
           throwRpcBoundaryError,
         );
-        const result = await handler.handler(parsedInput);
+        const result = await handler.handler(parsedInput, {
+          experimental_caller: caller,
+        });
         const parsedOutput = await validateRpcValue(
           handler.outputSchema,
           result,

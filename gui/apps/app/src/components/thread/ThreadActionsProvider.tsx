@@ -48,7 +48,33 @@ import { getThreadReadToggleAction } from "@cloudroom/client-core";
 import { getRootComposeRoutePath, getThreadRoutePath } from "@/lib/route-paths";
 import { getDesktopBrowserApi } from "@/lib/bb-desktop";
 import { useRouteNavigate } from "@/components/ui/app-route-anchor";
-import { getSidebarThreadNavigationTargets } from "@/components/sidebar/sidebarThreadShortcuts";
+import {
+  getSidebarThreadNavigationTargets,
+  type SidebarThreadShortcutTarget,
+} from "@/components/sidebar/sidebarThreadShortcuts";
+
+function getSidebarSectionTargets(
+  threadId: string,
+): SidebarThreadShortcutTarget[] {
+  return getSidebarThreadNavigationTargets(
+    document
+      .querySelector(`a[data-sidebar-thread-id="${threadId}"]`)
+      ?.closest<HTMLElement>("[data-sidebar-sticky-section]") ?? null,
+  );
+}
+
+function findArchiveFallback(
+  targets: readonly SidebarThreadShortcutTarget[],
+  threadId: string,
+  isAvailable: (target: SidebarThreadShortcutTarget) => boolean,
+): SidebarThreadShortcutTarget | undefined {
+  const index = targets.findIndex((target) => target.threadId === threadId);
+  if (index < 0) return undefined;
+  return (
+    targets.slice(index + 1).find(isAvailable) ??
+    targets.slice(0, index).reverse().find(isAvailable)
+  );
+}
 
 export interface ThreadActionsContextValue {
   archiveThreadAndChildren: (thread: Thread) => void;
@@ -101,8 +127,18 @@ export function ThreadActionsProvider({
   const navigate = useRouteNavigate();
   const { threadId: viewedThreadId } = useRouteState();
   const viewedThreadIdRef = useRef(viewedThreadId);
+  const openedSectionTargetsRef = useRef<{
+    threadId: string;
+    targets: SidebarThreadShortcutTarget[];
+  } | null>(null);
   useEffect(() => {
     viewedThreadIdRef.current = viewedThreadId;
+    openedSectionTargetsRef.current = viewedThreadId
+      ? {
+          threadId: viewedThreadId,
+          targets: getSidebarSectionTargets(viewedThreadId),
+        }
+      : null;
   }, [viewedThreadId]);
   const closePanesForThreads = useSetAtom(closePanesForThreadsAtom);
   const archiveThreadAndChildrenMutation = useArchiveThreadAndChildren();
@@ -307,27 +343,31 @@ export function ThreadActionsProvider({
 
   const performArchive = useCallback(
     (thread: Thread) => {
-      const sectionTargets = getSidebarThreadNavigationTargets(
-        document
-          .querySelector(`a[data-sidebar-thread-id="${thread.id}"]`)
-          ?.closest<HTMLElement>("[data-sidebar-sticky-section]") ?? null,
-      );
+      const sectionTargets = getSidebarSectionTargets(thread.id);
+      const opened = openedSectionTargetsRef.current;
+      const openedTargets =
+        opened?.threadId === thread.id ? opened.targets : [];
       archiveThreadAndChildrenMutateAsync({ id: thread.id }).then(
         (response) => {
           const navigateAwayIfArchived = () => {
             const viewed = viewedThreadIdRef.current;
             if (!viewed || !response.archivedThreadIds.includes(viewed)) return;
-            const index = sectionTargets.findIndex(
-              (target) => target.threadId === thread.id,
+            const listedThreadIds = new Set(
+              getSidebarThreadNavigationTargets(document.body).map(
+                (target) => target.threadId,
+              ),
             );
-            const remaining = (targets: typeof sectionTargets) =>
-              targets.filter(
+            const isAvailable = (target: SidebarThreadShortcutTarget) =>
+              !response.archivedThreadIds.includes(target.threadId) &&
+              listedThreadIds.has(target.threadId);
+            const fallback =
+              findArchiveFallback(openedTargets, thread.id, isAvailable) ??
+              findArchiveFallback(
+                sectionTargets,
+                thread.id,
                 (target) =>
                   !response.archivedThreadIds.includes(target.threadId),
               );
-            const fallback =
-              remaining(sectionTargets.slice(index + 1))[0] ??
-              remaining(sectionTargets.slice(0, Math.max(index, 0))).at(-1);
             navigate(
               fallback
                 ? getThreadRoutePath({

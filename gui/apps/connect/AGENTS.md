@@ -2,6 +2,7 @@
 
 - The Cloudflare Worker `cloudroom-connect` on cloudroom.run: phone sign-in, Mac switching, and Mac-to-Mac access ([ADR 0185](../../../docs/adr/0185-cloudflare-for-cloudroom-connect.md), [0238](../../../docs/adr/0238-mac-to-mac-access-off-bb.md), [0258](../../../docs/adr/0258-switch-macs-from-settings.md)).
 - Account, token scope, and IDs: [docs/external/cloudflare.md](../../../docs/external/cloudflare.md).
+- `app.cloudroom.run` is the phone app's one address ([ADR 0268](../../../docs/adr/0268-one-phone-app-set-up-at-cloudroom-dev-m.md)). Its manifest and icons come from `../app/public`, uploaded as Worker assets on every deploy.
 
 ## Its own database
 

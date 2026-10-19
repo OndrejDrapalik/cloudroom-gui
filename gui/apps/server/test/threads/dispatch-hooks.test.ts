@@ -660,6 +660,51 @@ describe("dispatch hooks and the no-hook path", () => {
       expect(attempts).toEqual(["join-turn"]);
     });
   });
+
+  it("names an inline agent send's sender and initiator instead of calling it the user's", async () => {
+    await withTestHarness(async (harness) => {
+      const seen: { initiator: string; senderThreadId: string | null }[] = [];
+      const registry = emptyRegistry();
+      registry["message.dispatch"].push({
+        pluginId: "audit",
+        handler: (context) => {
+          seen.push({
+            initiator: context.initiator,
+            senderThreadId: context.senderThreadId,
+          });
+          return { action: "reject", message: "recorded" } as const;
+        },
+      });
+      installHooks(registry);
+      const { thread, project } = seedRunnableThread(harness, {
+        hostId: "host-hook-sender",
+        status: "idle",
+      });
+      const sender = seedThread(harness.deps, { projectId: project.id });
+
+      await expectApiError(() =>
+        acceptThreadSendRequest(harness.deps, {
+          payload: {
+            input: textInput("from an agent"),
+            mode: "auto",
+            senderThreadId: sender.id,
+          },
+          thread,
+        }),
+      );
+      await expectApiError(() =>
+        acceptThreadSendRequest(harness.deps, {
+          payload: { input: textInput("from the user"), mode: "auto" },
+          thread,
+        }),
+      );
+
+      expect(seen).toEqual([
+        { initiator: "agent", senderThreadId: sender.id },
+        { initiator: "user", senderThreadId: null },
+      ]);
+    });
+  });
 });
 
 describe("message.dispatch hooks on the queue drain", () => {

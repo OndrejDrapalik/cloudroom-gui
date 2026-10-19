@@ -36,7 +36,7 @@ import {
 } from "@/components/tools/tools-navigation";
 import { AppBreadcrumbs } from "./AppBreadcrumbs";
 import { DesktopUpdateBanner } from "./DesktopUpdateBanner";
-import { ComputerFallbackBanner } from "@/components/settings/YourComputers";
+import { ComputerFallbackBanner, NewPhoneAppBanner } from "@/components/settings/YourComputers";
 import { resourceRouteLabelAtom } from "./resourceRouteLabelAtom";
 import { AppPageHeader, HEADER_ICON_BUTTON_CLASS } from "./AppPageHeader";
 import { stripProjectThreads } from "@/hooks/queries/project-queries";
@@ -826,6 +826,7 @@ export function AppLayout({ children }: AppLayoutProps) {
                       meta={meta}
                     />
                   ) : null}
+                  <NewPhoneAppBanner />
                   <ComputerFallbackBanner />
                   <DesktopUpdateBanner />
                   <main className="flex min-h-0 flex-1 flex-col p-4 md:p-5">

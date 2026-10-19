@@ -109,7 +109,12 @@ async function saveImages(stdout: string, shotsDir: string) {
   if (!stdout.includes("_b64")) return stdout;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout);
+    parsed = JSON.parse(
+      stdout.replace(
+        /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g,
+        (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+      ),
+    );
   } catch {
     return stdout;
   }

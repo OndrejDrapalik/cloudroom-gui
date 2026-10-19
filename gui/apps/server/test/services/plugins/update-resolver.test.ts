@@ -21,7 +21,6 @@ const cleanup: string[] = [];
 const compatibleProbe: GitCandidateProbe = async () => ({
   outcome: "compatible",
   devMode: false,
-  packagedBuildProblems: [],
 });
 
 afterEach(async () => {
@@ -71,15 +70,15 @@ function npmIntent(
 }
 
 describe("npm update candidate selection", () => {
-  it("selects an older compatible range candidate and reports the newer block", async () => {
+  it("selects an older compatible range candidate, ignoring engines.bb, and reports the newer block", async () => {
     const resolution = await resolveNpmUpdate({
       intent: npmIntent("^1.0.0", "range"),
       current: { version: "1.0.0", display: "bb-plugin-matrix@1.0.0" },
       appVersion: "1.5.0",
       run: createNpmResolverRun({
         fetch: packumentFetch({
-          "1.3.0": { bb: ">=2" },
-          "1.2.0": { bb: ">=1" },
+          "1.3.0": { sdk: ">=99" },
+          "1.2.0": { bb: ">=99" },
           "1.1.0-beta.1": { bb: ">=1" },
           "1.0.0": { bb: ">=1" },
         }),
@@ -91,7 +90,7 @@ describe("npm update candidate selection", () => {
       candidate: { version: "1.2.0" },
       blocked: {
         version: { version: "1.3.0" },
-        reasons: [{ engine: "bb", required: ">=2" }],
+        reasons: [{ engine: "bbPluginSdk", required: ">=99" }],
       },
     });
   });
@@ -172,7 +171,6 @@ describe("npm update candidate selection", () => {
       devMode: true,
       candidate: { version: "2.0.0" },
       blocked: { version: { version: "3.0.0" } },
-      packagedBuildProblems: [{ engine: "bb", required: ">=99" }],
     });
   });
 
@@ -561,18 +559,14 @@ describe("git semver tag resolution", () => {
               devMode: false,
               reasons: [
                 {
-                  engine: "bb",
+                  engine: "bbPluginSdk",
                   required: ">=99.0.0",
-                  actual: "1.0.0",
-                  message: "requires Cloudroom >=99.0.0, running Cloudroom is 1.0.0",
+                  actual: PLUGIN_SDK_VERSION,
+                  message: "requires Cloudroom plugin SDK >=99.0.0",
                 },
               ],
             }
-          : {
-              outcome: "compatible",
-              devMode: false,
-              packagedBuildProblems: [],
-            };
+          : { outcome: "compatible", devMode: false };
       },
     });
 
@@ -583,7 +577,7 @@ describe("git semver tag resolution", () => {
       candidate: { version: commitOf.get("v1.1.0") },
       blocked: {
         version: { version: commitOf.get("v2.0.0") },
-        reasons: [{ engine: "bb" }],
+        reasons: [{ engine: "bbPluginSdk" }],
       },
     });
   });
@@ -606,10 +600,10 @@ describe("git semver tag resolution", () => {
           devMode: false,
           reasons: [
             {
-              engine: "bb",
+              engine: "bbPluginSdk",
               required: ">=99.0.0",
-              actual: "1.0.0",
-              message: "requires Cloudroom >=99.0.0, running Cloudroom is 1.0.0",
+              actual: PLUGIN_SDK_VERSION,
+              message: "requires Cloudroom plugin SDK >=99.0.0",
             },
           ],
         }),
@@ -618,7 +612,7 @@ describe("git semver tag resolution", () => {
       outcome: "current",
       blocked: {
         version: { version: commitOf.get("v1.1.0") },
-        reasons: [{ engine: "bb" }],
+        reasons: [{ engine: "bbPluginSdk" }],
       },
     });
   });

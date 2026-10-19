@@ -95,7 +95,7 @@ describe("room-cli plugin update commands", () => {
     expect(output).toContain("pinned");
     expect(output).toContain("2.0.0: requires room >= 9");
     expect(output).toContain(
-      "incompatible [dev build: engines.bb not enforced]",
+      "incompatible [dev build]",
     );
     expect(output).toContain("unavailable");
   });

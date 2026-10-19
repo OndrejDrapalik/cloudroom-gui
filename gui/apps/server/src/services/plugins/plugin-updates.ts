@@ -31,6 +31,7 @@ import {
 } from "./update-resolver.js";
 import { PluginActivationRolledBackError } from "./plugin-activation.js";
 import type { createPluginActivation } from "./plugin-activation.js";
+import type { SafeModeActivationRefusalArgs } from "./plugin-runtime.js";
 import {
   createListedRegistryNpmResolverRun,
   type createManagedPluginArtifacts,
@@ -86,6 +87,9 @@ interface PluginUpdatesContext {
     "applyNpmCandidate" | "stageGitCandidate"
   >;
   runArtifactGc: ReturnType<typeof createPluginActivation>["runArtifactGc"];
+  safeModeActivationRefusal: (
+    args: SafeModeActivationRefusalArgs,
+  ) => string | null;
 }
 
 export function createPluginUpdates(
@@ -101,6 +105,7 @@ export function createPluginUpdates(
     npmIntentForRow,
     managedArtifacts: { applyNpmCandidate, stageGitCandidate },
     runArtifactGc,
+    safeModeActivationRefusal,
   } = context;
   const now = deps.now ?? Date.now;
   const gitCandidateProbeCache = new Map<string, GitCandidateProbeResult>();
@@ -115,11 +120,6 @@ export function createPluginUpdates(
     resolution: PluginUpdateResolution,
   ): PluginUpdateCheckEntry {
     const dev = resolution.devMode ? { devMode: true as const } : {};
-    const packagedDetail =
-      resolution.packagedBuildProblems !== undefined &&
-      resolution.packagedBuildProblems.length > 0
-        ? `dev mode selected this candidate; a packaged build would reject it: ${problemMessages(resolution.packagedBuildProblems).join("; ")}`
-        : undefined;
     const blocked =
       resolution.outcome === "incompatible"
         ? {
@@ -138,7 +138,6 @@ export function createPluginUpdates(
       installed,
       ...dev,
       ...(blocked ? { blocked } : {}),
-      ...(packagedDetail ? { detail: packagedDetail } : {}),
     };
     if (resolution.outcome === "update-available") {
       return { ...common, candidate: resolution.candidate };
@@ -315,11 +314,7 @@ export function createPluginUpdates(
       });
       const result: GitCandidateProbeResult =
         probed.outcome === "valid"
-          ? {
-              outcome: "compatible",
-              devMode: probed.devMode,
-              packagedBuildProblems: probed.packagedBuildProblems,
-            }
+          ? { outcome: "compatible", devMode: probed.devMode }
           : probed;
       if (result.outcome !== "invalid") {
         gitCandidateProbeCache.set(cacheKey, result);
@@ -354,9 +349,6 @@ export function createPluginUpdates(
     return {
       ...remote,
       ...(staged.devMode ? { devMode: true } : {}),
-      ...(staged.packagedBuildProblems.length > 0
-        ? { packagedBuildProblems: staged.packagedBuildProblems }
-        : {}),
     };
   }
 
@@ -548,6 +540,16 @@ export function createPluginUpdates(
       return withPluginOperationLock(REGISTRATION_MUTATION_KEY, async () => {
         const row = getInstalledPlugin(deps.db, id);
         if (!row) return { ok: false, error: `unknown plugin "${id}"` };
+        const safeModeRefusal = safeModeActivationRefusal({
+          pluginId: id,
+          provenance: row.provenance,
+          builtinName:
+            row.sourceKind === "builtin" ? row.sourceBuiltinName : null,
+          action: "update",
+        });
+        if (safeModeRefusal !== null) {
+          return { ok: false, error: safeModeRefusal };
+        }
         const from = installedUpdateVersion(row);
         const npmRun = npmRunForRow(row);
         const selectionNpmIntent =

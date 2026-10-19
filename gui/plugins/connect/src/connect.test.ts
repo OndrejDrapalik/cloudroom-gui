@@ -1424,14 +1424,12 @@ describe("connect plugin", () => {
     const exposed = (await harness.callRpc("expose", { port: 8000 })) as { url: string };
     expect(exposed.url).toBe("http://k3x9m2p7qa--8000.localhost:59340");
 
-    const fetchMock = vi.fn(async () =>
-      Response.json({ code: "K7QM-4XPA", expiresAt: 1, url: "https://cloudroom.run/pair?code=K7QM-4XPA" }),
-    );
+    const fetchMock = vi.fn(async () => Response.json({ revoked: 1 }));
     vi.stubGlobal("fetch", fetchMock);
-    const code = (await harness.callRpc("phoneCode")) as { code: string };
-    expect(code.code).toBe("K7QM-4XPA");
+    const result = (await harness.callRpc("signOutPhones")) as { revoked: number };
+    expect(result.revoked).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      new URL("http://localhost:59340/api/phone-code"),
+      new URL("http://localhost:59340/api/phone-sessions/revoke"),
       expect.objectContaining({
         method: "POST",
         headers: { authorization: `Bearer ${"a".repeat(64)}` },
@@ -1476,7 +1474,7 @@ describe("connect plugin", () => {
       expect(status).toMatchObject({ signedIn: false, paired: false });
     });
     expect(await bb.storage.kv.get("relay-credential")).toBeUndefined();
-    await expect(harness.callRpc("phoneCode")).rejects.toThrow(/Sign in to Cloudroom/);
+    await expect(harness.callRpc("signOutPhones")).rejects.toThrow(/Sign in to Cloudroom/);
     second.controller.abort();
     await second.done;
   });
@@ -1833,8 +1831,8 @@ describe("connect CLI", () => {
     const { harness } = await loadCli();
     const result = await harness.runCli([]);
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain("cloudroom.dev/mobile");
-    expect(result.stdout).toContain("room-cli connect phone-code");
+    expect(result.stdout).toContain("cloudroom.dev/m");
+    expect(result.stdout).toContain("room-cli connect phone");
     expect(result.stdout).toContain("room-cli connect status");
     expect(result.stdout).toContain("room-cli connect expose");
   });

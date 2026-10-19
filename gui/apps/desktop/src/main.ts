@@ -1163,11 +1163,19 @@ async function applyServerTarget(): Promise<void> {
   if (serverTargetStore === null) {
     return;
   }
-  const target = serverTargetStore.getTarget();
+  let target = serverTargetStore.getTarget();
   serverTargetGeneration += 1;
   const generation = serverTargetGeneration;
   const isCurrent = (): boolean => serverTargetGeneration === generation;
   setComputerFallback(null);
+
+  if (target.kind === "custom" && new URL(target.url).hostname.endsWith(".getbb.app")) {
+    desktopLogger.info(
+      `[desktop] ${target.url} was a getbb.app address, which no longer works — opening ${BUILTIN_SERVER_NAME}`,
+    );
+    await serverTargetStore.setCustomServerUrl(null);
+    target = serverTargetStore.getTarget();
+  }
 
   // Your other Mac on cloudroom.run. If it doesn't answer, use this Mac until it's back.
   if (target.kind === "connect") {

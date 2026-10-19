@@ -1393,7 +1393,7 @@ git installs) so people installing your plugin never need npm.
   plugin-relative compact SVG, or declare \`logo.light\` (with optional
   \`logo.dark\`). Logo assets must be relative \`.svg\`, \`.png\`, or
   \`.webp\` files.
-- \`engines.bb\` — supported Cloudroom app version range.
+- \`engines.bb\` — BB app version range. Cloudroom ignores it.
 - \`engines.bbPluginSdk\` — the lowest plugin SDK you need (scaffold:
   \`>=${PLUGIN_SDK_VERSION}\`). Cloudroom reads this as a floor, not a ceiling: a later
   SDK in the same major still loads your plugin.

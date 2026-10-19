@@ -1,4 +1,4 @@
-import type { TaskPriority, TaskStatus } from "../../shared/contract.js";
+import type { TaskPriority, TaskStatus } from "../shared/contract.js";
 import { cn } from "@cloudroom/shared-ui/lib/utils";
 
 const STATUS_CLASS: Record<TaskStatus, string> = {

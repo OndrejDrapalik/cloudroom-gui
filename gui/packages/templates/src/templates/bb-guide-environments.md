@@ -181,10 +181,10 @@ Remote access (cloudroom connect):
   Cloudroom Connect opens this Mac's Cloudroom from a phone or another computer at
   https://<id>.cloudroom.run. It sets itself up once you are signed in to Cloudroom:
   the server registers with the relay, holds the tunnel itself, and reconnects on
-  restart. A phone signs in with a one-time code from cloudroom.dev/mobile.
+  restart. A phone opens cloudroom.dev/m and signs in with the Cloudroom account.
 
   room-cli connect status                       Show remote-access status
-  room-cli connect phone-code                   Get a one-time code for cloudroom.dev/mobile
+  room-cli connect phone                        Show how to set up Cloudroom on your phone
   room-cli connect sign-out-phones              Sign out every phone and browser
   room-cli connect expose <port> [--host <name-or-id>]    Share a host's HTTP port
   room-cli connect unexpose <port> [--host <name-or-id>]  Stop sharing on that host

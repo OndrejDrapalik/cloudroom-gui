@@ -88,7 +88,11 @@ interface ListFixture {
 }
 
 function renderList(fixture: ListFixture) {
-  const calls = { listComments: 0, listAttachments: 0 };
+  const calls = {
+    listComments: 0,
+    listAttachments: 0,
+    metadataBatches: [] as number[],
+  };
   const slot = renderSlot(
     app.navPanels[0]!,
     { subPath: PROJECT_ID },
@@ -100,9 +104,20 @@ function renderList(fixture: ListFixture) {
         sidebarSummary: () => ({ projects: [] }),
         listLabels: () => ({ labels: fixture.labels ?? [] }),
         listTasks: () => ({ tasks: fixture.tasks }),
-        listTaskThreads: ({ taskId }: { taskId: string }) => ({
-          taskThreads: fixture.threadsByTask?.[taskId] ?? [],
-        }),
+        getTaskMetadata: ({ taskIds }: { taskIds: string[] }) => {
+          calls.metadataBatches.push(taskIds.length);
+          return {
+            metadata: taskIds.map((taskId) => ({
+              taskId,
+              activeThreads: (fixture.threadsByTask?.[taskId] ?? []).filter(
+                (thread) =>
+                  thread.liveStatus === "starting" ||
+                  thread.liveStatus === "working",
+              ),
+              attachmentCount: 0,
+            })),
+          };
+        },
         listComments: () => {
           calls.listComments += 1;
           return { comments: [] };
@@ -123,7 +138,7 @@ describe("list-row Active chip", () => {
     const starting = task(2);
     const historical = task(3);
     const bare = task(4);
-    const { slot } = renderList({
+    const { slot, calls } = renderList({
       tasks: [working, starting, historical, bare],
       threadsByTask: {
         [working.id]: [thread(working.id, "working", "W1")],
@@ -145,6 +160,12 @@ describe("list-row Active chip", () => {
       slot.getAllByText("Active", { selector: "span[title]" }),
     ).toHaveLength(2);
     expect(slot.queryByText(/Attached/)).toBeNull();
+    expect(calls.metadataBatches).toEqual([4]);
+    await slot.emitRealtime("threads:changed", { taskId: working.id });
+    await waitFor(() =>
+      expect(calls.metadataBatches.length).toBeGreaterThan(1),
+    );
+    expect(calls.metadataBatches.every((size) => size === 4)).toBe(true);
   });
 
   it("aggregates multiple live agents into one constant-text chip", async () => {
@@ -169,13 +190,22 @@ describe("list-row Active chip", () => {
 
 describe("list-row metadata rail", () => {
   it("fetches no comment/attachment data and renders no counts", async () => {
-    const { slot, calls } = renderList({ tasks: [task(1), task(2)] });
+    const { slot, calls } = renderList({
+      tasks: Array.from({ length: 501 }, (_, index) =>
+        makeTask({
+          id: String(index).padStart(26, "0"),
+          number: index + 1,
+          key: `TSK-${index + 1}`,
+        }),
+      ),
+    });
     await slot.findByText("TSK-1");
     await waitFor(() =>
       expect(slot.getAllByRole("button").length > 0).toBe(true),
     );
     expect(calls.listComments).toBe(0);
     expect(calls.listAttachments).toBe(0);
+    await waitFor(() => expect(calls.metadataBatches).toEqual([500, 1]));
     expect(slot.queryByTitle("Comments")).toBeNull();
     expect(slot.queryByTitle("Attachments")).toBeNull();
   });

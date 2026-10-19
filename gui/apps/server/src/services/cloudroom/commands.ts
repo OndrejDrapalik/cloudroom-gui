@@ -30,7 +30,7 @@ import { cloudSkills, copyLogins, copyMacGithub, importCodexLogin, importPiLogin
 import { noteWake, setupPreviews, stopPreviews, previewStatus } from "./previews.js";
 import { CloudSecrets } from "./secrets.js";
 import { CodexAccounts } from "./codex-accounts.js";
-import { cancelMacCodexLogin, hasMacCodexLogin, macCodexLogin, macCodexLoginExpired, macCursorLogin, revokeDesktopToken, startMacCodexLogin, SANDBOX_PREFIX, SandboxAsleep, SandboxDirectory, sandboxThread, type AutomationRun, type SandboxProject, type SandboxTrigger, type SandboxWakeTrigger } from "./sandboxes.js";
+import { cancelMacCodexLogin, hasMacCodexLogin, macCodexLogin, macCodexLoginExpired, cursorKeyRejected, macCursorLogin, revokeDesktopToken, startMacCodexLogin, SANDBOX_PREFIX, SandboxAsleep, SandboxDirectory, sandboxThread, type AutomationRun, type SandboxProject, type SandboxTrigger, type SandboxWakeTrigger } from "./sandboxes.js";
 import type { AppDeps, LoggedWorkSessionDeps } from "../../types.js";
 import { markMinutesSent, unsentMinutes } from "./time-in-app.js";
 import { emitPluginThreadCreated } from "../plugins/plugin-thread-events.js";
@@ -439,18 +439,19 @@ class CloudroomService {
     });
   }
 
-  /** A thread a cloud automation started from the website, say while this Mac was off (ADR 0239). It shows like any
-   *  Cloud thread, with the automation's thread's agent; its history streams in once its sandbox is awake or opened.
-   *  Only the Mac that has the automation's project shows it, and a thread this app already has is left alone. */
+  /** A thread the website started, say while this Mac was off: an automation's run (ADR 0239) or a top-level thread
+   *  another Cloud thread launched (ADR 0267). It shows like any Cloud thread; its history streams in once its
+   *  sandbox is awake or opened. Only the Mac that has its project shows it, and a thread this app already has is
+   *  left alone. */
   private adoptRun(run: AutomationRun): void {
-    // The automation's thread gives the agent; once it is deleted, the run's own label does (ADR 0250).
-    const source = getThread(this.deps.db, run.source), home = binding(this.deps.db, run.source);
-    const providerId = source && home ? source.providerId : run.harness, model = home?.model ?? run.model;
+    // The run's own label names its agent (a launch may pick another); older runs fall back to the source thread's (ADR 0250).
+    const source = getThread(this.deps.db, run.source), home = binding(this.deps.db, run.source), own = isCloudProvider(run.harness ?? undefined) && run.model;
+    const providerId = own ? run.harness : source && home ? source.providerId : run.harness, model = own ? run.model : home?.model ?? run.model;
     if (!providerId || !model || (source && source.projectId !== run.project) || !getProject(this.deps.db, run.project) || getThread(this.deps.db, run.thread)) return;
     const adopted = this.deps.db.transaction(tx => {
       if (getThread(tx, run.thread) || tx.select().from(cloudroomThreads).where(eq(cloudroomThreads.sessionId, run.session)).get()) return null;
       const thread = createThread(tx, this.deps.hub, { id: run.thread, executionTarget: "cloud", projectId: run.project, providerId, title: run.title, titleFallback: "Loop run", status: "pending" });
-      tx.insert(cloudroomThreads).values({ threadId: run.thread, coreUrl: SANDBOX_PREFIX + run.thread, sessionId: run.session, startRequestId: run.session.replace(/^cr_/, ""), model, reasoning: home?.reasoning ?? "medium" }).run();
+      tx.insert(cloudroomThreads).values({ threadId: run.thread, coreUrl: SANDBOX_PREFIX + run.thread, sessionId: run.session, startRequestId: run.session.replace(/^cr_/, ""), model, reasoning: run.reasoning ?? home?.reasoning ?? "medium" }).run();
       return thread;
     });
     if (!adopted) return;
@@ -961,6 +962,7 @@ class CloudroomService {
       if (action !== "key") return sandbox.state === "connected" ? sandbox : { ...sandbox, message: "Cloud threads use this Mac's Cursor login, or a Cursor user API key." };
       const key = apiKey?.trim() ?? "";
       if (!/^[\x21-\x7e]{1,4096}$/.test(key)) throw new ApiError(400, "invalid_request", "Enter a valid Cursor API key.");
+      if (await cursorKeyRejected(key)) throw new ApiError(400, "invalid_request", "Cursor says this API key is invalid. Check it and try again.");
       await this.sandboxes.saveLogin("cursor", JSON.stringify({ apiKey: key }));
       if ((await this.savedConnection())?.token) await this.vmCursorAuth(action, requestId, key).catch(error => this.warn("Cursor could not be connected on the VM", error));
       return { ...sandbox, state: "connected" as const };
@@ -991,12 +993,14 @@ class CloudroomService {
       let copied = false;
       if (action === "cancel") cancelMacCodexLogin();
       if (action === "login") {
+        const account = sandbox.state === "connected" ? await this.codexAccounts.selected() : null;
+        if (account) throw new ApiError(409, "codex_account_rejected", `Cloud uses your Codex account ${account}. Sign in to it again with Add in Settings → Agents → Codex, or pick This Mac there.`);
         if (await copyLogins(this.deps) !== true) {
           reportAgentConnect("codex", "failed", { code: "copy_logins_off" });
           throw new ApiError(409, "codex_auth_unsupported", "Cloud sandboxes use this Mac's Codex login. Turn on \"Auth my agents in the cloud automatically\" in Settings → Cloud, then try again.");
         }
-        // Signed out or expired here: sign in on this Mac first, then the next status check copies the new login.
-        if (await hasMacCodexLogin() && !await macCodexLoginExpired()) {
+        // Signed out or expired here, or the cloud rejected the saved login: sign in on this Mac first, then the next status check copies the new login.
+        if (sandbox.state !== "connected" && await hasMacCodexLogin() && !await macCodexLoginExpired()) {
           await this.sandboxes.copyMacLogins(true, await copyMacGithub(this.deps));
           copied = true;
         } else startMacCodexLogin();
@@ -1007,13 +1011,13 @@ class CloudroomService {
         copied = true;
       }
       const status = copied ? (await this.sandboxLogin("codex"))! : sandbox;
-      if (status.state === "connected" && (action === "login" || run?.done)) reportAgentConnect("codex", "ok", { cliPlace: cliPlace(findCliExecutable("codex")) });
-      if (status.state === "connected" || !run) return status;
-      if (run.error) {
+      if (run && !run.done) return { ...status, state: "waiting" as const, login_id: "mac", verification_url: run.url, message: "Finish signing in to ChatGPT in your browser." };
+      if (run?.error) {
         reportAgentConnect("codex", "failed", { code: "login_failed", message: run.error, cliPlace: cliPlace(findCliExecutable("codex")) });
         return { ...status, state: "error" as const, message: run.error };
       }
-      return run.done ? status : { ...status, state: "waiting" as const, login_id: "mac", verification_url: run.url, message: "Finish signing in to ChatGPT in your browser." };
+      if (status.state === "connected" && (action === "login" || run?.done)) reportAgentConnect("codex", "ok", { cliPlace: cliPlace(findCliExecutable("codex")) });
+      return status;
     }
     try {
       const client = await this.client();
@@ -1109,8 +1113,7 @@ class CloudroomService {
     const project = getProject(this.deps.db, request.projectId);
     if (!project) throw new ApiError(404, "project_not_found", "Project not found");
     if (!isCloudProvider(request.providerId) || request.originKind || request.sourceThreadId || request.sendAt || request.pluginSubmission || (request.environment.type !== "project-default" && !codeFrom))
-      throw new ApiError(400, "cloudroom_unsupported", "Cloud supports new Codex, Pi, fx, opencode, Hermes Agent, Devin and Claude Code threads in a cloud folder. Forks, scheduling and native machine targets are not supported.");
-    if (request.providerId === "acp-cursor") throw new ApiError(400, "cloudroom_unsupported", "Cursor isn't available in Cloud. Use Codex or Claude Code.");
+      throw new ApiError(400, "cloudroom_unsupported", "Cloud supports new Codex, Pi, Cursor, fx, opencode, Hermes Agent, Devin, OpenClaw and Claude Code threads in a cloud folder. Forks, scheduling and native machine targets are not supported.");
     if (request.permissionMode && request.permissionMode !== "full") throw new ApiError(400, "cloudroom_unsupported", "Cloud uses the full permission mode; restricted modes are not supported.");
     if (request.startedOnBehalfOf || request.sourceSeqEnd !== undefined) throw new ApiError(400, "cloudroom_unsupported", "Cloud continuation and delegated starts are not enabled.");
     // A new sandbox starts on first delivery, so check against the last known capabilities.
@@ -1297,7 +1300,7 @@ class CloudroomService {
       if (!saved?.sessionId) throw new ApiError(409, "cloudroom_not_started", "Wait for the cloud agent to start, then switch.");
       await this.requireOwnThread(saved);
       if (teleportBlocked(this.deps.db, thread.id)) throw new ApiError(409, "teleport_in_progress", "Wait for Teleport to finish, then switch.");
-      if (!isCloudProvider(target.providerId) || target.providerId === "acp-cursor") throw new ApiError(400, "cloudroom_unsupported", "This agent can't run in Cloud.");
+      if (!isCloudProvider(target.providerId)) throw new ApiError(400, "cloudroom_unsupported", "This agent can't run in Cloud.");
       const oldSession = saved.sessionId;
       await this.requireNoSessionDependents(thread.id, saved);
       const client = await this.client(saved);
@@ -1738,6 +1741,7 @@ class CloudroomService {
     const harness = thread.providerId;
     if (!isCloudProvider(harness)) throw new ApiError(400, "cloudroom_harness", "Unsupported cloud harness.");
     validateReasoning(harness, coreModel(harness, saved.model, capabilities).model, saved.reasoning, capabilities);
+    if (harness === "codex" && sandboxThread(saved.coreUrl) && authRequiredMessages.has(saved.error ?? "")) await this.sandboxes.refreshCodex(threadId).catch(error => this.warn("Cloud Codex login could not be refreshed before the retry", error, { threadId }));
     // A retry can start from the sign-in resume and a click at once; only the first one past the awaits sends.
     if (command(this.deps.db, `first_${threadId}`)?.state !== "failed") return;
     this.deps.db.transaction((tx) => {
@@ -1806,6 +1810,7 @@ class CloudroomService {
       void this.uploadMacConfig(); // Rate-limited to once a minute; only changed skills are sent.
       void this.reportOnboarding();
       if (this.lastCapabilities) void this.ensurePreviews(this.lastCapabilities);
+      void this.sandboxes.discover().catch(() => {});
       for (const saved of bindings(this.deps.db)) {
         const thread = getThread(this.deps.db, saved.threadId);
         // Archived threads take no work. Asleep ones share one awake-list check per app (sandboxes.ts).

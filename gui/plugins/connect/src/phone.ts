@@ -1,7 +1,6 @@
 import { deriveConnectBaseUrl } from "@cloudroom/connect-client";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type { ConnectTunnel } from "./tunnel.js";
-import type { PhoneCode } from "./types.js";
 
 const ACCOUNT_KV_KEY = "relay-account";
 const CHECK_INTERVAL_MS = 60_000;
@@ -44,10 +43,6 @@ export class PhoneRelay {
         this.onChange();
       });
     return this.checking;
-  }
-
-  phoneCode(): Promise<PhoneCode> {
-    return this.call("/api/phone-code") as Promise<PhoneCode>;
   }
 
   signOutPhones(): Promise<{ revoked: number }> {

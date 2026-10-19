@@ -1285,6 +1285,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "An assistant answer.",
       sourceSeqEnd: 9,
+      experimental_messageSeq: 9,
     });
     expect(context.selectedText).toBeUndefined();
     expect(context.openPanel({ actionId: "panel", params: { a: 1 } })).toBe(
@@ -1415,6 +1416,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "An assistant answer.",
       sourceSeqEnd: 9,
+      experimental_messageSeq: 9,
     });
   });
 
@@ -1516,6 +1518,7 @@ describe("ThreadTimelineRows actions", () => {
       role: "assistant",
       text: "Select part of this answer.",
       sourceSeqEnd: 11,
+      experimental_messageSeq: 11,
     });
     expect(context.openPanel({ actionId: "panel" })).toBe(false);
   });

@@ -16,6 +16,7 @@ export interface Env {
   DB: D1Database;
   BASE_DOMAIN: string;
   WEBSITE_URL: string;
+  ASSETS?: Fetcher;
 }
 
 const TUNNEL_TAG = "tunnel";

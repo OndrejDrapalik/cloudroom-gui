@@ -46,6 +46,7 @@ async function writePlugin(
     name: string;
     version?: string;
     engines?: string;
+    pluginSdkRange?: string;
     serverSource: string;
     bb?: Record<string, unknown>;
   },
@@ -57,7 +58,12 @@ async function writePlugin(
     JSON.stringify({
       name: options.name,
       version: options.version ?? "0.1.0",
-      ...(options.engines ? { engines: { bb: options.engines } } : {}),
+      engines: {
+        ...(options.engines ? { bb: options.engines } : {}),
+        ...(options.pluginSdkRange
+          ? { bbPluginSdk: options.pluginSdkRange }
+          : {}),
+      },
       bb: {
         name: "Service fixture",
         description: "Plugin service fixture.",
@@ -597,7 +603,7 @@ describe("plugin service", () => {
   it("marks initial engine mismatches incompatible and preserves a live plugin when reload finds its directory missing", async () => {
     const tooNew = await writePlugin(workDir, {
       name: "bb-plugin-too-new",
-      engines: ">=99.0.0",
+      pluginSdkRange: ">=99.0.0",
       serverSource: `export default function plugin() {}`,
     });
     await service.installPath(tooNew);
@@ -619,7 +625,7 @@ describe("plugin service", () => {
     expect(service.getApi("vanishing")).toBeDefined();
   });
 
-  it("logs a warning when a host upgrade makes an installed plugin incompatible (#1915)", async () => {
+  it("keeps an installed plugin running when engines.bb no longer matches (BB's app version is ignored)", async () => {
     const lines: string[] = [];
     const push = (level: string) => (message: unknown) => {
       lines.push(`${level} ${String(message)}`);
@@ -674,13 +680,8 @@ describe("plugin service", () => {
     const after = makeService("0.39.0");
     await after.start();
     const entry = after.list().find((p) => p.id === "notify");
-    expect(entry?.status).toBe("incompatible");
-    expect(entry?.statusDetail).toBe(
-      "requires Cloudroom >=0.38.0 <0.39.0, this is 0.39.0",
-    );
-    expect(lines).toContain(
-      "warn plugin notify not loaded (incompatible): requires Cloudroom >=0.38.0 <0.39.0, this is 0.39.0",
-    );
+    expect(entry?.status).toBe("running");
+    expect(lines.some((line) => line.includes("not loaded"))).toBe(false);
     await after.stop();
   });
 

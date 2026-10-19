@@ -61,7 +61,6 @@ export {
   createBridgeJsonRpcTestHarness as experimental_createBridgeJsonRpcTestHarness,
   describeCalibrationEvents as experimental_describeCalibrationEvents,
   normalizeCalibrationEvents as experimental_normalizeCalibrationEvents,
-  toConformanceMessages as experimental_toConformanceMessages,
 } from "@cloudroom/provider-bridge-protocol/testing";
 export type {
   BridgeDeltaEventCollector,

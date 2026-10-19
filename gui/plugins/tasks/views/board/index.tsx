@@ -8,11 +8,13 @@ import {
 import {
   type Label,
   type Task,
+  type TaskMetadata,
   type TaskStatus,
   type TaskThread,
 } from "../../shared/contract.js";
 import {
   listAllTasks,
+  loadTaskMetadata,
   useTasksQuery,
   useTasksRpc,
   type TasksRpc,
@@ -26,8 +28,7 @@ import {
   dropNeighborsForIndex,
   visibleBoardStatuses,
 } from "./drop-position.js";
-import { PriorityIcon, StatusIcon } from "./icons.js";
-import { isActiveThread } from "../detail/meta.js";
+import { PriorityIcon, StatusIcon } from "../../components/task-icons.js";
 import { STATUS_LABELS } from "../list/lib.js";
 import { Button } from "@cloudroom/shared-ui/button";
 import { DelayedLoading } from "@cloudroom/shared-ui/delayed-loading";
@@ -81,37 +82,10 @@ async function fetchBoard(
     if (task.status === "done") entry.done += 1;
     subProgress.set(task.parentTaskId, entry);
   }
-  const activeTaskIds = await listAllTasks(rpc, {
-    projectId,
-    activeOnly: true,
-  }).then(
-    (result) => new Set(result.map((task) => task.id)),
-    () => new Set<string>(),
-  );
-  const workingByTaskId = new Map<string, TaskThread[]>();
-  await Promise.all(
-    boardTasks
-      .filter((task) => activeTaskIds.has(task.id))
-      .map(async (task) => {
-        const threads = await rpc
-          .call("listTaskThreads", { taskId: task.id })
-          .then(
-            (result) => result.taskThreads,
-            () => [],
-          );
-        workingByTaskId.set(task.id, threads.filter(isActiveThread));
-      }),
-  );
-  const attachmentCounts = new Map<string, number>();
-  await Promise.all(
-    boardTasks.map(async (task) => {
-      const count = await rpc.call("listAttachments", { taskId: task.id }).then(
-        (result) => result.attachments.length,
-        () => 0,
-      );
-      attachmentCounts.set(task.id, count);
-    }),
-  );
+  const metadata = await loadTaskMetadata(
+    rpc,
+    boardTasks.map((task) => task.id),
+  ).catch(() => new Map<string, TaskMetadata>());
 
   return {
     tasks: boardTasks,
@@ -120,8 +94,8 @@ async function fetchBoard(
       boardTasks.map((task) => [
         task.id,
         {
-          workingThreads: workingByTaskId.get(task.id) ?? [],
-          attachmentCount: attachmentCounts.get(task.id) ?? 0,
+          workingThreads: metadata.get(task.id)?.activeThreads ?? [],
+          attachmentCount: metadata.get(task.id)?.attachmentCount ?? 0,
           subDone: subProgress.get(task.id)?.done ?? 0,
           subTotal: subProgress.get(task.id)?.total ?? 0,
           parentTitle:

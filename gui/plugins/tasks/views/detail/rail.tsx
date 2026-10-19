@@ -11,12 +11,8 @@ import { TASK_PRIORITIES, TASK_STATUSES } from "../../shared/contract.js";
 import type { Preset } from "../../shared/contract.js";
 import { errorMessage } from "../../shared/errors.js";
 import { useTasksQuery, useTasksRpc } from "../../shell/data.js";
-import {
-  PriorityIcon,
-  StatusIcon,
-  formatDueDate,
-  isActiveThread,
-} from "./meta.js";
+import { PriorityIcon, StatusIcon } from "../../components/task-icons.js";
+import { formatDueDate, isActiveThread } from "./meta.js";
 import {
   DUE_DATE_PRESETS,
   localIsoDate,

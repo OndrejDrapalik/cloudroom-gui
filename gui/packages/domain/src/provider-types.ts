@@ -4,6 +4,7 @@ import {
   permissionModeSchema,
   promptMentionCommandTriggerSchema,
   reasoningLevelSchema,
+  serviceTierSchema,
 } from "./shared-types.js";
 import { extensionKindSchema } from "./provider-extension-kind.js";
 import { threadEventItemPresentationSchema } from "./item-presentation.js";
@@ -13,6 +14,13 @@ export const modelReasoningEffortSchema = z.object({
   description: z.string(),
 });
 export type ModelReasoningEffort = z.infer<typeof modelReasoningEffortSchema>;
+
+export const modelServiceTierSchema = z.object({
+  id: serviceTierSchema,
+  label: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+});
+export type ModelServiceTier = z.infer<typeof modelServiceTierSchema>;
 
 export const availableModelSchema = z.object({
   id: z.string(),

@@ -78,6 +78,7 @@ function renderList(tasks: Task[], options: Options = {}) {
         listLabels: () => ({ labels: [label] }),
         listTasks: () => ({ tasks }),
         listTaskThreads: () => ({ taskThreads: [] }),
+        getTaskMetadata: () => ({ metadata: [] }),
         listComments: () => ({ comments: [] }),
         listAttachments: () => ({ attachments: [] }),
         updateTask: (input) => {

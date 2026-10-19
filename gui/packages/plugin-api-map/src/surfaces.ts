@@ -1010,10 +1010,13 @@ export const SURFACE_GROUPS: SurfaceGroup[] = [
           "Use the same client from plugin UI with useSdk(), bound to the plugin",
           "Have the threads it creates attributed back to the plugin",
           "Read the server's loopback URL, public app URL, and data directory when it needs server facts",
+          "Read or toggle plugin safe mode with sdk.plugins.experimental_getSafeMode and experimental_setSafeMode; safe mode stops every installed plugin that doesn't ship with Cloudroom and restores the enabled ones when it ends, reporting any that fail to start",
         ],
         apiSymbols: [
           "BbPluginApi",
           "PluginServerApi",
+          "PluginsArea.experimental_getSafeMode",
+          "PluginsArea.experimental_setSafeMode",
           "useSdk",
           "PluginBrowserBbSdk",
         ],

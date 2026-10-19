@@ -1,5 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { ComposerPlusMenuItem, ComposerView } from "@get-bb/plugin-sdk";
+import type {
+  ComposerPlusMenuItem,
+  ComposerView,
+  PluginComposerApi,
+} from "@get-bb/plugin-sdk";
 import { Button } from "@cloudroom/shared-ui/button";
 import { COARSE_POINTER_PROMPT_ICON_ACTION_BUTTON_CLASS } from "@cloudroom/shared-ui/coarse-pointer-sizing";
 import { DropdownMenuItem } from "@cloudroom/shared-ui/dropdown-menu";
@@ -279,12 +283,15 @@ function PluginComposerPlusMenuEntryContent({
 }) {
   const composer = useComposer();
   const view = useComposerView();
+  const composerOrView = { ...composer, draft: composer.draft, run: view.run };
   const disabled =
-    typeof item.disabled === "function" ? item.disabled(view) : item.disabled;
+    typeof item.disabled === "function"
+      ? item.disabled(composerOrView)
+      : item.disabled;
 
   const run = async () => {
     try {
-      await item.run({ composer, view });
+      await item.run({ composer, view } as { composer: PluginComposerApi });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(

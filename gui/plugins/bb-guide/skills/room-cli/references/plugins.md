@@ -111,8 +111,8 @@
     refuses an unselected install and lists its entry names.
   - `room-cli plugin outdated` — check installed plugins for compatible updates
     (table; `--json` for raw results). Shows latest compatible candidate and
-    any blocked incompatible newer release. Dev builds (bb `0.0.0`) annotate
-    that `engines.room` is not enforced.
+    any blocked incompatible newer release. Only `engines.bbPluginSdk` decides
+    compatibility; `engines.bb` is ignored.
   - `room-cli plugin update <id>` / `room-cli plugin update --all` — apply compatible
     updates for tracking sources, including newer tags that satisfy a Git
     semver range. Same full-trust confirmation as install (`--yes` skips;
@@ -134,6 +134,12 @@
     `room-cli plugin remove <id>` (deletes the plugin's settings, secrets, and
     schedules; managed git/npm files are deleted, and local path sources stay
     on disk).
+  - `room-cli plugin safe-mode [on|off] [--json]` — show or change plugin safe
+    mode. `on` stops every plugin that doesn't ship with Cloudroom, official
+    catalog plugins included, and keeps each plugin's enabled setting. `off`
+    restarts the ones that were enabled and exits 1 naming any that fail to
+    start. Installing or updating a stopped plugin is refused while it is on.
+    Settings → Plugins has the same switch.
   - `room-cli plugin config <id> [set <key> <value> | unset <key>]` — declared
     settings; boolean and number arguments are converted to their declared
     types. Reload the plugin after configuring (`room-cli plugin reload <id>`).

@@ -20,6 +20,7 @@
         "grok": "./icons/grok.svg",
         "fx": "./icons/fx.svg",
         "hermes-agent": "./icons/hermes-agent.svg",
+        "openclaw": "./icons/openclaw.svg",
         "devin": "./icons/devin.svg"
       }
     },

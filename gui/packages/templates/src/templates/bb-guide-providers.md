@@ -98,9 +98,11 @@ the Chrome extension and a claude.ai login. A change restarts the thread's
 Claude process before its next turn and keeps the conversation.
 
 Known ACP agents can appear automatically when their CLI is installed on the
-host. For example, opencode, omp, Grok Build's grok CLI, or Hermes' hermes CLI
-on PATH appears as provider acp-opencode, acp-omp, acp-grok, or
-acp-hermes-agent.
+host. For example, opencode, omp, Grok Build's grok CLI, Hermes' hermes CLI, or
+the openclaw CLI on PATH appears as provider acp-opencode, acp-omp, acp-grok,
+acp-hermes-agent, or acp-openclaw. OpenClaw threads run through the Gateway on
+the host, which cloudroom starts if it is off; each thread gets its own Gateway
+session in the thread's folder.
 
 cloudroom indexes the native user and project skill roots for Codex, Claude Code, Pi,
 Cursor, OpenCode, omp, Grok Build, and Hermes Agent. This includes compatibility

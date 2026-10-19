@@ -69,6 +69,7 @@ function seededRpc(overrides: Record<string, unknown> = {}) {
       projects: [{ projectId: PROJECT_ID, taskCount: 3, activeAgentCount: 1 }],
     }),
     listTasks: () => ({ tasks: [] }),
+    getTaskMetadata: () => ({ metadata: [] }),
     getTaskByKey: () => ({ task: null }),
     ...overrides,
   };
@@ -924,15 +925,59 @@ describe("tasks app shell", () => {
   });
 
   it("renders board and task subPaths without plugin-owned sidebar chrome", async () => {
+    const card = makeTask({ projectId: PROJECT_ID, status: "in_progress" });
+    let active = true;
     const boardSlot = renderSlot(
       app.navPanels[0]!,
       { subPath: `${PROJECT_ID}?view=board` },
-      { rpc: seededRpc() },
+      {
+        rpc: seededRpc({
+          listTasks: () => ({ tasks: [card] }),
+          getTaskMetadata: () => ({
+            metadata: [
+              {
+                taskId: card.id,
+                activeThreads: active
+                  ? [
+                      {
+                        id: "01HZZZZZZZZZZZZZZZZZZZZZH1",
+                        taskId: card.id,
+                        threadId: "thr_worker",
+                        presetName: "Worker",
+                        title: "Work",
+                        liveStatus: "working",
+                        attachedAt: card.createdAt,
+                        updatedAt: card.updatedAt,
+                      },
+                    ]
+                  : [],
+                attachmentCount: active ? 2 : 0,
+              },
+            ],
+          }),
+        }),
+      },
     );
     await boardSlot.findByText("Backlog");
     await boardSlot.findByText("In Review");
     expect(boardSlot.getByText("Tasks Plugin")).toBeDefined();
     expect(boardSlot.queryByRole("button", { name: /sidebar/i })).toBeNull();
+    await boardSlot.findByText("Worker");
+    expect(boardSlot.getByLabelText("2 attachments")).toBeDefined();
+    expect(
+      boardSlot.rpcCalls.filter((call) => call.method === "getTaskMetadata"),
+    ).toHaveLength(1);
+    expect(
+      boardSlot.rpcCalls.some(
+        (call) =>
+          call.method === "listTaskThreads" ||
+          call.method === "listAttachments",
+      ),
+    ).toBe(false);
+    active = false;
+    await boardSlot.emitRealtime("threads:changed", { taskId: card.id });
+    await waitFor(() => expect(boardSlot.queryByText("Worker")).toBeNull());
+    expect(boardSlot.queryByLabelText("2 attachments")).toBeNull();
     cleanup();
 
     const taskSlot = renderSlot(

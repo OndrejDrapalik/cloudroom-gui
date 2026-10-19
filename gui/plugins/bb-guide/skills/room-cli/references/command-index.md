@@ -318,6 +318,7 @@ configures the machine with optional configured `preset` and `image` names;
 - `room-cli plugin rpc call`
 - `room-cli plugin enable`
 - `room-cli plugin disable`
+- `room-cli plugin safe-mode`
 - `room-cli plugin config`
 - `room-cli plugin token`
 - `room-cli plugin run`

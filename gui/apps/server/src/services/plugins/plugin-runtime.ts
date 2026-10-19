@@ -19,7 +19,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire, registerHooks } from "node:module";
 import { performance } from "node:perf_hooks";
 import { createJiti } from "jiti";
-import semver from "semver";
 import { HOST_ARTIFACT_MAX_BYTES } from "@cloudroom/host-daemon-contract/protocol";
 import {
   calculateExponentialBackoffDelay,
@@ -41,6 +40,7 @@ import { createNodeBbSdk, type BbSdk } from "@cloudroom/sdk";
 import { experimental_aiServicesHostContract } from "@get-bb/plugin-sdk/ai-services";
 import {
   getInstalledPlugin,
+  getPluginSafeMode,
   listInstalledPlugins,
   prunePluginSchedules,
   upsertPluginSchedule,
@@ -99,6 +99,7 @@ import type {
   PluginWireLookup,
   ServiceRuntime,
 } from "./plugin-service-internal.js";
+import { createPluginRpcCallerRegistry } from "./plugin-rpc-caller.js";
 import { createKeyedLock } from "../lib/async-deduper.js";
 import { runEventLoopWork } from "../system/event-loop-work.js";
 
@@ -288,8 +289,19 @@ interface ServiceInstance {
 interface PluginRuntimeContext {
   machineEnrollments: MachineEnrollmentService | null;
   deps: PluginServiceDeps;
+  /** Bundled plugins that ship with the app; safe mode keeps them running. */
+  includedBuiltinNames: ReadonlySet<string>;
   settingsChanged?: () => void;
 }
+
+export interface SafeModeActivationRefusalArgs {
+  pluginId: string;
+  provenance: InstalledPluginRow["provenance"];
+  builtinName: string | null;
+  action: "install" | "update";
+}
+
+const PLUGIN_SAFE_MODE_DETAIL = "safe mode is on";
 
 export function createPluginRuntime(context: PluginRuntimeContext) {
   const { deps } = context;
@@ -298,6 +310,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
   const loadTimeoutMs = deps.loadTimeoutMs ?? DEFAULT_LOAD_TIMEOUT_MS;
   const serviceStopTimeoutMs =
     deps.serviceStopTimeoutMs ?? DEFAULT_SERVICE_STOP_TIMEOUT_MS;
+  const rpcCallers = createPluginRpcCallerRegistry();
   const serviceRestartBaseMs =
     deps.serviceRestartBaseMs ?? DEFAULT_SERVICE_RESTART_BASE_MS;
 
@@ -845,24 +858,6 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     );
   }
 
-  function checkEngineRange(manifest: PluginManifest): string | undefined {
-    if (!manifest.bbEngineRange) return undefined;
-    const version = semver.coerce(deps.appVersion);
-    if (!version) {
-      logger.warn(
-        `cannot parse app version "${deps.appVersion}" for engines check; skipping`,
-      );
-      return undefined;
-    }
-    if (version.major === 0 && version.minor === 0 && version.patch === 0) {
-      return undefined;
-    }
-    if (!semver.satisfies(version, manifest.bbEngineRange)) {
-      return `requires Cloudroom ${manifest.bbEngineRange}, this is ${version.version}`;
-    }
-    return undefined;
-  }
-
   function checkPluginSdkRange(manifest: PluginManifest): string | undefined {
     if (!manifest.bbPluginSdkRange) return undefined;
     if (!isPluginSdkRangeSatisfied(manifest.bbPluginSdkRange)) {
@@ -1317,7 +1312,58 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     handle.invalidate();
   }
 
+  // Plugin safe mode stops every plugin that does not ship with the app. Each
+  // plugin keeps its own enabled flag, so turning safe mode off restores them.
+  function isSafeModeExempt(args: {
+    provenance: InstalledPluginRow["provenance"];
+    builtinName: string | null;
+  }): boolean {
+    return (
+      args.provenance === "builtin" ||
+      (args.builtinName !== null &&
+        context.includedBuiltinNames.has(args.builtinName))
+    );
+  }
+
+  function isSafeModeExemptRow(
+    row: Pick<
+      InstalledPluginRow,
+      "provenance" | "sourceKind" | "sourceBuiltinName"
+    >,
+  ): boolean {
+    return isSafeModeExempt({
+      provenance: row.provenance,
+      builtinName: row.sourceKind === "builtin" ? row.sourceBuiltinName : null,
+    });
+  }
+
+  function isSuppressedBySafeMode(
+    row: Pick<
+      InstalledPluginRow,
+      "enabled" | "provenance" | "sourceKind" | "sourceBuiltinName"
+    >,
+  ): boolean {
+    return (
+      row.enabled && !isSafeModeExemptRow(row) && getPluginSafeMode(deps.db)
+    );
+  }
+
+  function safeModeActivationRefusal(
+    args: SafeModeActivationRefusalArgs,
+  ): string | null {
+    if (isSafeModeExempt(args) || !getPluginSafeMode(deps.db)) return null;
+    return `plugin safe mode is on; turn it off with \`room-cli plugin safe-mode off\` before you ${args.action} "${args.pluginId}"`;
+  }
+
   async function loadOne(row: InstalledPluginRow): Promise<string | null> {
+    if (isSuppressedBySafeMode(row)) {
+      await disposeOne(row.id);
+      await populateIdentity(row);
+      if ((hungServices.get(row.id)?.size ?? 0) === 0) {
+        setStatus(row.id, "disabled", PLUGIN_SAFE_MODE_DETAIL);
+      }
+      return null;
+    }
     if (row.enabled && !loaded.has(row.id)) setStatus(row.id, "starting");
     await populateIdentity(row);
     if (!row.enabled) {
@@ -1364,8 +1410,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
         error instanceof Error ? error.message : String(error),
       );
     }
-    const engineProblem =
-      checkEngineRange(manifest) ?? checkPluginSdkRange(manifest);
+    const engineProblem = checkPluginSdkRange(manifest);
     if (engineProblem) {
       return failBeforeFactory("incompatible", engineProblem);
     }
@@ -1407,6 +1452,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
       },
       getAppUrl: deps.getAppUrl ?? (() => null),
       getLoopbackBaseUrl: () => boundLoopbackBaseUrl,
+      rpcCaller: rpcCallers.issue(row.id),
       publishSignal: (channel, payload) => {
         deps.hub.notifyPluginSignal(row.id, channel, payload);
       },
@@ -1819,9 +1865,9 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     appBundles,
     hostArtifacts,
     bindSdk,
+    resolveRpcCaller: rpcCallers.resolve,
     buildThreadDto,
     builtinSourceWatchers,
-    checkEngineRange,
     checkPluginSdkRange,
     disposeAll,
     disposeOne,
@@ -1833,6 +1879,8 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     hungServices,
     invokeWrapped,
     isBuiltinPluginId,
+    isSafeModeExemptRow,
+    isSuppressedBySafeMode,
     listPluginHooks,
     listPluginEnvironmentCompositions,
     listPluginEnvironmentProviders,
@@ -1846,6 +1894,7 @@ export function createPluginRuntime(context: PluginRuntimeContext) {
     loaded,
     loadOne,
     brandingAssets,
+    safeModeActivationRefusal,
     setDevBuildProblem,
     setStatus,
     sourceKind,

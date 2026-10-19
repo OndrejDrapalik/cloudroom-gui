@@ -201,8 +201,9 @@ describe("PromptBoxActionsMenu", () => {
         item: {
           id: "improve",
           label: "Improve prompt",
-          run: ({ view: receivedView }) => {
-            focusedByPlugin(receivedView);
+          // Older plugins still receive the ComposerView beside the composer.
+          run: (context) => {
+            focusedByPlugin((context as { view?: unknown }).view);
             document.getElementById("plugin-focus-target")?.focus();
           },
         },
@@ -215,7 +216,7 @@ describe("PromptBoxActionsMenu", () => {
         item: {
           id: "rewrite",
           label: "Rewrite prompt",
-          disabled: (receivedView) => receivedView.draft.isEmpty,
+          disabled: (composer) => composer.isEmpty,
           run: vi.fn(),
         },
       },

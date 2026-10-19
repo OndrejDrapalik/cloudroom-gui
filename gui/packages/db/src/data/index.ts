@@ -114,8 +114,10 @@ export type {
 export {
   getAppKeybindingOverrides,
   getAppSettings,
+  getPluginSafeMode,
   setAppKeybindingOverrides,
   setAppSettings,
+  setPluginSafeMode,
 } from "./app-settings.js";
 export { getStoredThreadTabs, replaceStoredThreadTabs } from "./thread-tabs.js";
 export {

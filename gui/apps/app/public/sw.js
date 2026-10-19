@@ -4,6 +4,8 @@ const API = "cloudroom-api";
 const LIVE_API =
   /^\/api\/v1\/(?:system\/version$|search|threads\/[^/]+\/(?:timeline|host-files|events|search))/;
 const OFFLINE_HEADERS = ["x-cloudroom-offline", "x-bb-tunnel-offline"];
+const MAC_HEADER = "x-cloudroom-mac";
+const MAC_KEY = "/__cloudroom-mac";
 
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) =>
@@ -55,14 +57,24 @@ async function asset(request) {
   return response;
 }
 
+async function forMac(response) {
+  const mac = response.headers.get(MAC_HEADER) ?? "";
+  const shell = await caches.open(SHELL);
+  const known = await shell.match(MAC_KEY);
+  if ((known ? await known.text() : "") === mac) return;
+  await caches.delete(API);
+  await shell.put(MAC_KEY, new Response(mac));
+}
+
 async function api(request) {
-  const saved = await caches.open(API);
   let response;
   try {
     response = await fetch(request);
   } catch {
-    return (await saved.match(request)) ?? Response.error();
+    return (await (await caches.open(API)).match(request)) ?? Response.error();
   }
+  await forMac(response);
+  const saved = await caches.open(API);
   if (response.ok) {
     await saved.put(request, response.clone());
     return response;

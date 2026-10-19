@@ -3,6 +3,7 @@ import { useSyncExternalStore } from "react";
 import type {
   ComposerCustomization,
   ExperimentalAppOverlayRegistration,
+  ExperimentalCodeFenceRendererRegistration,
   PluginDiffRendererRegistration,
   PluginEnvironmentProviderInputsRegistration,
   PluginMachineProviderInputsRegistration,
@@ -55,6 +56,7 @@ export interface PluginRegistrationSet {
   messageDirectives: readonly PluginMessageDirectiveRegistration[];
   messageActions?: readonly PluginMessageActionRegistration[];
   commandPaletteActions?: readonly CollectedPluginCommandRegistration[];
+  codeFenceRenderers?: readonly ExperimentalCodeFenceRendererRegistration[];
   providerIcons?: readonly CollectedPluginProviderIconRegistration[];
   icons?: readonly ExperimentalIconRegistration[];
   timelineRenderers?: readonly PluginTimelineRendererRegistration[];
@@ -103,8 +105,12 @@ export interface PluginMessageDirectiveSlot
   extends PluginMessageDirectiveRegistration, PluginSlotBase {}
 export interface PluginMessageActionSlot
   extends PluginMessageActionRegistration, PluginSlotBase {}
+type CollectedAppCommandRegistration = Extract<
+  CollectedPluginCommandRegistration,
+  { target: "app" }
+>;
 export interface PluginCommandPaletteActionSlot
-  extends CollectedPluginCommandRegistration, PluginSlotBase {}
+  extends CollectedAppCommandRegistration, PluginSlotBase {}
 interface PluginIconSlot extends ExperimentalIconRegistration, PluginSlotBase {}
 interface PluginProviderIconSlot
   extends CollectedPluginProviderIconRegistration, PluginSlotBase {}
@@ -228,6 +234,24 @@ function flattenRegistrations(
       pluginId,
       generation,
     }));
+  const unsupported = [
+    ...(set.commandPaletteActions ?? [])
+      .filter((action) => action.target === "composer")
+      .map((action) => `composer command "${action.id}"`),
+    ...(set.codeFenceRenderers ?? []).map(
+      (renderer) => `code fence renderer "${renderer.id}"`,
+    ),
+    ...(set.composerCustomizations ?? []).flatMap((customization) =>
+      (customization.sendMenu ?? []).map(
+        (item) => `send menu item "${item.id}"`,
+      ),
+    ),
+  ];
+  for (const registration of unsupported) {
+    console.warn(
+      `plugin ${pluginId}: ${registration} ignored — not supported in Cloudroom yet`,
+    );
+  }
   const sidebarFooterItems = getCollectedSidebarFooterItems(set) ?? [
     ...set.sidebarFooterActions.map(adaptSidebarFooterAction),
     ...(set.experimentalSidebarFooterItems ?? []).map(
@@ -253,7 +277,12 @@ function flattenRegistrations(
     diffRenderers: stamp(set.diffRenderers),
     messageDirectives: stamp(set.messageDirectives),
     messageActions: stamp(set.messageActions),
-    commandPaletteActions: stamp(set.commandPaletteActions),
+    commandPaletteActions: stamp(
+      (set.commandPaletteActions ?? []).filter(
+        (action): action is CollectedAppCommandRegistration =>
+          action.target === "app",
+      ),
+    ),
     providerIcons: stamp(set.providerIcons),
     icons: stamp(set.icons),
     timelineRenderers: stamp(set.timelineRenderers),

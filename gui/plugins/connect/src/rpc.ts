@@ -3,7 +3,7 @@ import { defineRpcContract, type PluginRpcHandlers } from "@get-bb/plugin-sdk";
 import { connectCredentialSchema } from "@cloudroom/connect-client";
 import type { ConnectTunnel } from "./tunnel.js";
 import type { PhoneRelay } from "./phone.js";
-import type { ConnectStatus, PhoneCode, ShareListing } from "./types.js";
+import type { ConnectStatus, ShareListing } from "./types.js";
 import type { ShareHostResolver } from "./hosts.js";
 import {
   setupJobInputSchema,
@@ -49,10 +49,6 @@ const connectStatusSchema: z.ZodType<ConnectStatus> = z
   })
   .strict();
 
-const phoneCodeSchema: z.ZodType<PhoneCode> = z
-  .object({ code: z.string(), expiresAt: z.number(), url: z.string() })
-  .strict();
-
 const macSchema: z.ZodType<Mac> = z
   .object({
     handle: z.string(),
@@ -69,7 +65,6 @@ const remoteInstructionsInputSchema = z.object({ enabled: z.boolean().optional()
 
 export const connectRpcContract = defineRpcContract({
   status: { input: z.null(), output: connectStatusSchema },
-  phoneCode: { input: z.null(), output: phoneCodeSchema },
   signOutPhones: {
     input: z.null(),
     output: z.object({ revoked: z.number().int() }).strict(),
@@ -122,9 +117,6 @@ export function createRpcHandlers(args: {
   return {
     async status() {
       return { ...status(), shares: await relay.listShares() };
-    },
-    async phoneCode() {
-      return phone.phoneCode();
     },
     async signOutPhones() {
       return phone.signOutPhones();

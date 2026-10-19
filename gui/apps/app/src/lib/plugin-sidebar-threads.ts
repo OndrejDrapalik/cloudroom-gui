@@ -9,6 +9,8 @@ import {
   threadListIndicatorStateForThread,
 } from "@cloudroom/client-core";
 import { isThreadRead } from "@cloudroom/client-core";
+import { getThreadRoutePath } from "@/lib/route-paths";
+import { getThreadDisplayTitle } from "./thread-title";
 
 export function toPluginSidebarThread(
   entry: ThreadListEntry,
@@ -28,6 +30,17 @@ export function toPluginSidebarThread(
     projectId: entry.projectId,
     title: entry.title,
     titleFallback: entry.titleFallback,
+    displayTitle: getThreadDisplayTitle(entry),
+    href: getThreadRoutePath({ projectId: entry.projectId, threadId: entry.id }),
+    status: entry.status,
+    runtimeStatus: entry.runtime.displayStatus,
+    queuedWork: entry.queuedWork,
+    sourceThreadId: entry.sourceThreadId,
+    lifecycleOwnerThreadId: null,
+    isHidden: entry.visibility !== "visible",
+    archivedAt: entry.archivedAt,
+    pinnedAt: entry.pinnedAt,
+    pinSortKey: entry.pinSortKey,
     parentThreadId: entry.parentThreadId,
     sectionId: entry.sectionId,
     originKind: entry.originKind,
@@ -55,6 +68,8 @@ export function toPluginSidebarThread(
             branchName: entry.environmentBranchName,
             providerId: entry.environmentProviderId,
             workspaceDisplayKind: entry.environmentWorkspaceDisplayKind,
+            path: entry.environmentPath,
+            isWorktree: entry.environmentIsWorktree,
           },
     host:
       entry.environmentHostId === null

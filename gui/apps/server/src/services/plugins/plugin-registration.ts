@@ -39,7 +39,10 @@ import {
 } from "./install-sources.js";
 import { gitRefNameForRow, gitSelectorForRow } from "./git-source-intent.js";
 import { readPluginManifest, type PluginManifest } from "./manifest.js";
-import { forgetMutableRoot } from "./plugin-runtime.js";
+import {
+  forgetMutableRoot,
+  type SafeModeActivationRefusalArgs,
+} from "./plugin-runtime.js";
 import type {
   InstallRegistrationIdentity,
   RegisterInstalledArgs,
@@ -100,24 +103,26 @@ interface PluginRegistrationContext {
     { status: PluginRuntimeStatus; detail: string | null }
   >;
   validateInstallDir: (args: RegisterInstalledArgs) => Promise<PluginManifest>;
-  checkEngineRange: (manifest: PluginManifest) => string | undefined;
   checkPluginSdkRange: (manifest: PluginManifest) => string | undefined;
   syncCliSkill: () => Promise<void>;
   notifyPluginsChanged: () => void;
   list: () => InstalledPlugin[];
   runInstallHandlers: (id: string) => Promise<void>;
+  safeModeActivationRefusal: (
+    args: SafeModeActivationRefusalArgs,
+  ) => string | null;
 }
 
 export function createPluginRegistration(context: PluginRegistrationContext) {
   const {
     deps,
+    safeModeActivationRefusal,
     bundledPlugins,
     withLifecycleLock,
     disposeOne,
     loadOne,
     statuses,
     validateInstallDir,
-    checkEngineRange,
     checkPluginSdkRange,
     syncCliSkill,
     notifyPluginsChanged,
@@ -324,6 +329,14 @@ export function createPluginRegistration(context: PluginRegistrationContext) {
   ): Promise<InstalledPlugin> {
     const initialManifest =
       args.preparedManifest ?? (await readPluginManifest(args.rootDir));
+    const safeModeRefusal = safeModeActivationRefusal({
+      pluginId: initialManifest.id,
+      provenance: args.provenance.kind,
+      builtinName:
+        args.sourceIntent.kind === "builtin" ? args.sourceIntent.name : null,
+      action: "install",
+    });
+    if (safeModeRefusal !== null) throw new Error(safeModeRefusal);
     assertInstallRegistrationAvailable(
       getInstalledPlugin(deps.db, initialManifest.id),
       args,
@@ -336,9 +349,7 @@ export function createPluginRegistration(context: PluginRegistrationContext) {
       refuseBuiltinShadow(initialManifest.id);
     }
     if (args.refuseEngineMismatch) {
-      const engineProblem =
-        checkEngineRange(initialManifest) ??
-        checkPluginSdkRange(initialManifest);
+      const engineProblem = checkPluginSdkRange(initialManifest);
       if (engineProblem !== undefined) {
         throw new Error(
           `install refused: plugin "${initialManifest.id}" ${engineProblem}`,

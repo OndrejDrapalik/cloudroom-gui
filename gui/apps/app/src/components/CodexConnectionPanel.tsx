@@ -46,6 +46,7 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
   const [open, setOpen] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [signedIn, setSignedIn] = useState(false);
   const requestId = useRef<string | null>(null);
   const accountId = account.data?.account?.id;
   const queryKey = [`cloudroom-${provider}-auth`, accountId];
@@ -62,6 +63,7 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
       setThreadId((event as CustomEvent<string | null>).detail);
       setOpen(true);
       setCopied(false);
+      setSignedIn(false);
     };
     window.addEventListener(events, show);
     return () => window.removeEventListener(events, show);
@@ -83,6 +85,7 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
         ? kind === "key" ? await sdk.cloudroom.cursorApiKey(requestId.current, key) : kind === "login" ? await sdk.cloudroom.cursorLogin(requestId.current) : await sdk.cloudroom.cancelCursorLogin(auth.data!.login_id!)
         : kind === "login" ? await sdk.cloudroom.codexLogin(requestId.current) : await sdk.cloudroom.cancelCodexLogin(auth.data!.login_id!);
       if (result.state === "error") throw new Error(result.message ?? `${name} sign-in failed`);
+      setSignedIn(kind !== "cancel");
       queryClient.setQueryData(queryKey, result);
       if (result.state !== "waiting") requestId.current = null;
       // Without a device code, Codex is signing in on this Mac and has opened the browser itself.
@@ -91,6 +94,7 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
     onSettled: () => queryClient.invalidateQueries({ queryKey }),
   });
   const state = auth.data?.state;
+  const rejected = !cursor && Boolean(threadId) && !signedIn && state === "connected";
   const close = () => { setApiKey(""); setOpen(false); };
   if (!accountId || !account.data?.ready) return null;
   return <PersistentResponsiveDrawerShell
@@ -104,7 +108,11 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
         <p id={descriptionId} className="text-sm text-muted-foreground">{cursor ? "Use your Cursor account on your cloud VM." : "Use your ChatGPT subscription on your cloud VM."}</p>
       </div>
       {(action.error || auth.error) && <p role="alert" className="text-sm text-destructive">{action.error?.message ?? auth.error?.message}</p>}
-      {auth.isPending ? <p role="status">Checking cloud login…</p> : state === "connected" ? <>
+      {auth.isPending ? <p role="status">Checking cloud login…</p> : rejected ? <>
+        <p role="status" className="text-sm text-muted-foreground">Codex in Cloud didn't accept your saved ChatGPT login. Sign in again to replace it.</p>
+        <Button className="w-full" disabled={action.isPending} onClick={() => action.mutate("login")}>{action.isPending ? "Starting sign-in…" : "Sign in again"}</Button>
+        <Button variant="outline" disabled={action.isPending} onClick={() => action.mutate("continue")}>Try again</Button>
+      </> : state === "connected" ? <>
         <p role="status">Connected{auth.data?.email ? ` · ${auth.data.email}` : ""}</p>
         <Button className="w-full" disabled={action.isPending} onClick={() => action.mutate("continue")}>{threadId ? "Continue to task" : "Done"}</Button>
       </> : state === "waiting" ? <>
@@ -126,7 +134,7 @@ function ConnectionPanel({ provider }: { provider: "codex" | "cursor" }) {
         </div></details>}
         {(auth.isError || state === "unavailable" || state === "limited") && <Button variant="outline" disabled={auth.isFetching} onClick={() => void auth.refetch()}>Check again</Button>}
       </>}
-      {state !== "connected" && <Button variant="ghost" className="w-full" onClick={close}>Later</Button>}
+      {(state !== "connected" || rejected) && <Button variant="ghost" className="w-full" onClick={close}>Later</Button>}
     </div>
   </PersistentResponsiveDrawerShell>;
 }

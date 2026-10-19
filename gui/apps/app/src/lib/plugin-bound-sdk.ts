@@ -27,6 +27,23 @@ export function bindSdkToPlugin(
     ...sdk,
     threads: {
       ...sdk.threads,
+      async experimental_listPluginMetadata(args: {
+        threadIds: readonly string[];
+        pluginId?: string;
+        signal?: AbortSignal;
+      }) {
+        const threads = await Promise.all(
+          args.threadIds.map(async (threadId) => ({
+            threadId,
+            metadata: await sdk.threads.getPluginMetadata({
+              threadId,
+              pluginId: args.pluginId ?? pluginId,
+              ...(args.signal === undefined ? {} : { signal: args.signal }),
+            }),
+          })),
+        );
+        return { threads };
+      },
       getPluginMetadata(
         args: Omit<ThreadPluginMetadataArgs, "pluginId"> & {
           pluginId?: string;

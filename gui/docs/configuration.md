@@ -483,7 +483,8 @@ Known ACP agents appear when their CLI is installed on the host. bb exposes
 `acp-opencode` when `opencode` is on PATH and can be launched as `opencode acp`,
 `acp-omp` when `omp` (oh-my-pi) is on PATH, `acp-grok` when Grok Build's `grok`
 CLI is on PATH and can be launched as `grok agent stdio`, and
-`acp-hermes-agent` when Hermes' `hermes` CLI is on PATH, and `acp-devin` when
+`acp-hermes-agent` when Hermes' `hermes` CLI is on PATH, `acp-openclaw` when the
+`openclaw` CLI is on PATH (it runs through the host's OpenClaw Gateway), and `acp-devin` when
 Devin's `devin` CLI is on PATH. `acp-cursor` is always listed.
 
 Add your own agent through the ACP providers plugin's `customAgents` setting,
@@ -887,7 +888,7 @@ and holds the tunnel in its background service: it proxies relayed requests to
 the server's own loopback and reconnects with capped backoff. There is no
 foreground client and no pairing step.
 
-- `room-cli connect phone-code` prints a one-time code for cloudroom.dev/mobile.
+- `room-cli connect phone` prints the phone setup link, cloudroom.dev/m.
   `room-cli connect sign-out-phones` ends every phone session.
 - `room-cli connect expose <port>` run from a thread shares that thread
   environment's enrolled host. Server-host URLs are
@@ -1152,8 +1153,8 @@ name fails the install and asks for `@semver:` or `@ref:`. Local
 path installs register the directory in place and never delete it. Builtin
 plugins use `builtin:<name>` and ship with bb unless removed. Managed
 (`git:`/`npm:`) installs
-refuse plugins whose optional `engines.bb` or `engines.bbPluginSdk` ranges
-do not match the running bb/SDK, or whose `dist/*.meta.json` plugin identity
+refuse plugins whose optional `engines.bbPluginSdk` range does not match the
+running SDK, or whose `dist/*.meta.json` plugin identity
 does not match the package manifest; installing a non-builtin source whose
 derived id collides with a builtin name (automations, connect,
 custom-instructions, inline-vis, secrets, workflows) is also refused.
@@ -1169,8 +1170,8 @@ The same tracking intent drives updates: `bb plugin outdated` checks for
 compatible candidates (and reports blocked incompatible newer releases);
 `bb plugin update <id>` / `bb plugin update --all` applies them. Pinned source
 intent is never widened by update; remove and reinstall to choose a different
-source intent. Dev builds (bb `0.0.0`) do not enforce `engines.bb` and annotate
-that on check results.
+source intent. Cloudroom ignores `engines.bb` (BB's app version); only
+`engines.bbPluginSdk` gates compatibility.
 Update confirmation matches install (full-trust code; `--yes` skips; non-TTY
 refuses without it). Plugins are full-trust code running inside the bb server
 process: they can read all local bb data, including other plugins' secrets.

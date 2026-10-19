@@ -15,6 +15,7 @@ import {
   PHONE_CODE_TTL_MS,
   SESSION_TTL_MS,
   SHARE_CODE_TTL_MS,
+  accountHandles,
   accountServers,
   codeHandle,
   consumeCode,
@@ -26,6 +27,7 @@ import {
   machineByCredential,
   normalizeCode,
   phoneUser,
+  pickServer,
   registerServer,
   revokeSessions,
   serverByCredential,
@@ -50,6 +52,10 @@ const PUBLIC_APP_FILES =
   /^\/(?:manifest[\w-]*\.webmanifest|apple-touch-icon[\w-]*\.png|icon-[\w-]+\.png|favicon[\w.-]*)$/;
 /** What a new remote host downloads before it has a credential. The Mac checks the one-time enrollment itself. */
 const INSTALL_PATHS = new Set(["/install.sh", "/install/version", "/install/bb-app.tgz"]);
+const APP_HANDLE = "app";
+const LOGIN_TOKEN = /^[\w-]+\.[\w-]+\.[\w-]+$/;
+const MAC_HEADER = "x-cloudroom-mac";
+const NEXT_COOKIE = "__Host-cloudroom-next";
 
 interface Visitor {
   handle: string;
@@ -122,9 +128,9 @@ async function openComputer(request: Request, env: Env, self: Server): Promise<R
   return json({ url: origin, cookie: { name: SESSION_COOKIE, value, expiresAt } });
 }
 
-function redirect(location: string, setCookie?: string): Response {
+function redirect(location: string, ...setCookies: string[]): Response {
   const headers = new Headers({ location, "cache-control": "no-store" });
-  if (setCookie) headers.set("set-cookie", setCookie);
+  for (const cookie of setCookies) headers.append("set-cookie", cookie);
   return new Response(null, { status: 302, headers });
 }
 
@@ -315,15 +321,15 @@ async function apex(request: Request, url: URL, env: Env): Promise<Response> {
       });
     }
     if (url.pathname === "/api/phone-sessions/revoke") {
-      const revoked = await revokeSessions(env.DB, server.id);
-      const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(server.handle));
-      const closed = await stub.fetch(
-        new Request(
-          `https://${server.handle}.${env.BASE_DOMAIN}/__control/revoke-visitors`,
-          { method: "POST" },
+      const revoked = await revokeSessions(env.DB, server);
+      const closed = await Promise.all(
+        (await accountHandles(env.DB, server.userId)).map((handle) =>
+          env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(handle))
+            .fetch(new Request(`https://${handle}.${env.BASE_DOMAIN}/__control/revoke-visitors`, { method: "POST" }))
+            .then((response) => response.ok, () => false),
         ),
       );
-      if (!closed.ok) {
+      if (closed.includes(false)) {
         return json({ error: "Could not close phone connections. Try again." }, 503);
       }
       return json({ revoked });
@@ -331,6 +337,7 @@ async function apex(request: Request, url: URL, env: Env): Promise<Response> {
   }
   if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/pair")) {
     const raw = url.searchParams.get("code");
+    if (raw === null && url.pathname === "/") return redirect(`${new URL(env.WEBSITE_URL).origin}/m`);
     if (raw === null) return codePage("/pair", undefined, 200);
     const code = normalizeCode(raw);
     const handle = code === null ? null : await codeHandle(env.DB, code);
@@ -349,9 +356,10 @@ function serverOrigin(server: Server, target: string | null, env: Env): string {
   return `https://${server.handle}${target === null ? "" : `--${target}`}.${env.BASE_DOMAIN}`;
 }
 
-/** Sends a phone to the Mac's app to get a one-time ticket for a shared port, on the Mac or one of its remote hosts. */
+/** Sends a phone to the app to get a one-time ticket for a shared port, on the Mac or one of its remote hosts. */
 function shareHop(mac: Server, port: string, returnPath: string, env: Env, machineHandle?: string): string {
-  const next = new URL(`${serverOrigin(mac, null, env)}/__share`);
+  const next = new URL(`https://${APP_HANDLE}.${env.BASE_DOMAIN}/__share`);
+  next.searchParams.set("mac", mac.handle);
   next.searchParams.set("port", port);
   if (machineHandle !== undefined) next.searchParams.set("machine", machineHandle);
   next.searchParams.set("return", returnPath);
@@ -406,12 +414,13 @@ async function visitor(
 
   if (url.pathname === "/__pair") {
     const code = normalizeCode(url.searchParams.get("code") ?? "");
-    if (code === null || !(await consumeCode(env.DB, code, server.id, target))) {
+    const used = code === null ? null : await consumeCode(env.DB, code, server.id, target);
+    if (used === null) {
       return target === null
         ? codePage("/__pair", WRONG_CODE)
         : messagePage("Link expired", "Open the link again.", 400);
     }
-    const token = await createSession(env.DB, server.id, target);
+    const token = await createSession(env.DB, server.id, target, SESSION_TTL_MS, used.userId);
     return redirect(safeReturnPath(url.searchParams.get("return")), sessionCookie(token));
   }
 
@@ -437,22 +446,14 @@ async function visitor(
   }
 
   if (url.pathname === "/__share") {
-    const port = url.searchParams.get("port") ?? "";
-    if (target !== null || !PORT.test(port)) return text("Not found\n", 404);
-    if (!signedIn) return codePage("/__pair");
-    const machineHandle = url.searchParams.get("machine");
-    const host =
-      machineHandle === null
-        ? server
-        : HANDLE.test(machineHandle)
-          ? await serverByHandle(env.DB, machineHandle, true)
-          : null;
-    if (!host || (host.id !== server.id && host.ownerServerId !== server.id)) return text("Not found\n", 404);
-    const { code } = await createCode(env.DB, host.id, port, SHARE_CODE_TTL_MS);
-    const next = new URL(`${serverOrigin(host, port, env)}/__pair`);
-    next.searchParams.set("code", code);
-    next.searchParams.set("return", safeReturnPath(url.searchParams.get("return")));
-    return redirect(next.toString());
+    if (target !== null) return text("Not found\n", 404);
+    if (!signedIn) {
+      const next = new URL(`https://${APP_HANDLE}.${env.BASE_DOMAIN}/__share${url.search}`);
+      next.searchParams.set("mac", server.handle);
+      next.searchParams.set("signin", "1");
+      return redirect(next.toString());
+    }
+    return shareRedirect(env, server, url);
   }
   if (url.pathname.startsWith("/__")) return text("Not found\n", 404);
 
@@ -463,7 +464,35 @@ async function visitor(
     if (target === null) return codePage("/__pair");
     return redirect(shareHop(server, target, url.pathname + url.search, env));
   }
+  return forward(request, env, ctx, server, target);
+}
 
+async function shareRedirect(env: Env, mac: Server, url: URL): Promise<Response> {
+  const port = url.searchParams.get("port") ?? "";
+  if (!PORT.test(port)) return text("Not found\n", 404);
+  const machineHandle = url.searchParams.get("machine");
+  const host =
+    machineHandle === null
+      ? mac
+      : HANDLE.test(machineHandle)
+        ? await serverByHandle(env.DB, machineHandle, true)
+        : null;
+  if (!host || (host.id !== mac.id && host.ownerServerId !== mac.id)) return text("Not found\n", 404);
+  const { code } = await createCode(env.DB, host.id, port, SHARE_CODE_TTL_MS, mac.userId);
+  const next = new URL(`${serverOrigin(host, port, env)}/__pair`);
+  next.searchParams.set("code", code);
+  next.searchParams.set("return", safeReturnPath(url.searchParams.get("return")));
+  return redirect(next.toString());
+}
+
+async function forward(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  server: Server,
+  target: string | null,
+): Promise<Response> {
+  const stub = env.TUNNEL_DO.get(env.TUNNEL_DO.idFromName(server.handle));
   const doRequest = requestForTunnelDo(request, target);
   if (request.headers.get("upgrade")?.toLowerCase() === "websocket") {
     return stub.fetch(doRequest);
@@ -489,11 +518,130 @@ async function visitor(
   return response;
 }
 
+async function signIn(request: Request, env: Env): Promise<Response> {
+  const website = new URL(env.WEBSITE_URL);
+  const setup = `${website.origin}/m`;
+  if (request.headers.get("origin") !== website.origin) return redirect(setup);
+  const login = (await request.formData().catch(() => null))?.get("token");
+  if (typeof login !== "string" || login.length > 8192 || !LOGIN_TOKEN.test(login)) return redirect(setup);
+  const verified = await fetch(`${website.origin}/api/connect/phone-sign-in`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${login}` },
+    redirect: "manual",
+  }).catch(() => null);
+  if (verified?.status === 401) return redirect(setup);
+  if (verified?.status === 403) {
+    return messagePage("No access yet", "This Cloudroom account can't use the app yet.", 403);
+  }
+  const userId = verified?.ok
+    ? ((await verified.json().catch(() => null)) as { userId?: unknown } | null)?.userId
+    : undefined;
+  if (typeof userId !== "string" || !userId) {
+    return messagePage("Try again", "Cloudroom could not check your sign-in. Try again soon.", 503);
+  }
+  const [mac] = (await accountServers(env.DB, userId)).sort((a, b) => (b.lastSeenAt ?? 0) - (a.lastSeenAt ?? 0));
+  if (!mac) {
+    return messagePage(
+      "Open Cloudroom on your computer",
+      "Sign in to the Cloudroom desktop app once, then open cloudroom.dev/m again.",
+      409,
+    );
+  }
+  const token = await createSession(env.DB, mac.id, null, SESSION_TTL_MS, userId);
+  return redirect(
+    shareReturn(readCookie(request.headers.get("cookie"), NEXT_COOKIE)),
+    sessionCookie(token),
+    `${NEXT_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=0`,
+  );
+}
+
+function shareReturn(value: string | null): string {
+  try {
+    const next = decodeURIComponent(value ?? "");
+    return next.startsWith("/__share?") ? next : "/";
+  } catch {
+    return "/";
+  }
+}
+
+function withOrigin(request: Request, origin: string): Request {
+  const headers = new Headers(request.headers);
+  headers.set("origin", origin);
+  return new Request(request, { headers });
+}
+
+async function switchMac(request: Request, url: URL, env: Env, token: string, userId: string): Promise<Response> {
+  if (request.headers.get("origin") !== url.origin) return json({ error: "Wrong origin." }, 403);
+  const handle = (await readJson(request)).handle;
+  const mac = typeof handle === "string" && HANDLE.test(handle) ? await serverByHandle(env.DB, handle, true) : null;
+  if (!mac || mac.userId !== userId || mac.ownerServerId !== null || !(await pickServer(env.DB, token, mac))) {
+    return json({ error: "That Mac is not on your account." }, 404);
+  }
+  return json({ ok: true });
+}
+
+async function onlineMac(env: Env, picked: Server): Promise<Server | null> {
+  for (const mac of await accountServers(env.DB, picked.userId)) {
+    if (mac.id !== picked.id && (await isOnline(env, mac.handle))) return mac;
+  }
+  return null;
+}
+
+async function phoneApp(request: Request, url: URL, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (request.method === "POST" && url.pathname === "/__signin") return signIn(request, env);
+  const token = sessionToken(request);
+  const session = token ? await sessionByToken(env.DB, token) : null;
+  const picked = session?.userId && session.target === null ? await serverById(env.DB, session.serverId) : null;
+  if (!token || !session?.userId || !picked || picked.userId !== session.userId) {
+    const mac = url.searchParams.get("mac") ?? "";
+    if (url.pathname === "/__share" && HANDLE.test(mac)) {
+      if (url.searchParams.get("signin") !== "1") {
+        return redirect(`https://${mac}.${env.BASE_DOMAIN}/__share${url.search}`);
+      }
+      url.searchParams.delete("signin");
+      return redirect(
+        `${new URL(env.WEBSITE_URL).origin}/m`,
+        `${NEXT_COOKIE}=${encodeURIComponent(url.pathname + url.search)}; Path=/; Secure; HttpOnly; SameSite=None; Max-Age=900`,
+      );
+    }
+    if (request.method === "GET" && PUBLIC_APP_FILES.test(url.pathname) && env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+    if (request.method !== "GET" || !wantsHtml(request)) return text("Sign in required\n", 401);
+    return redirect(`${new URL(env.WEBSITE_URL).origin}/m`);
+  }
+  if (request.method === "POST" && url.pathname === "/__mac") {
+    return switchMac(request, url, env, token, session.userId);
+  }
+  if (url.pathname === "/__share") {
+    const handle = url.searchParams.get("mac") ?? "";
+    const mac = HANDLE.test(handle) ? await serverByHandle(env.DB, handle, true) : null;
+    if (!mac || mac.userId !== session.userId || mac.ownerServerId !== null) return text("Not found\n", 404);
+    return shareRedirect(env, mac, url);
+  }
+  const cloudPath = CLOUD_PATH.exec(url.pathname)?.[1];
+  if (cloudPath !== undefined) return cloud(request, cloudPath, url, env, token);
+  if (url.pathname.startsWith("/__")) return text("Not found\n", 404);
+  let server = picked;
+  if (request.method === "GET" && wantsHtml(request) && !(await isOnline(env, server.handle))) {
+    const other = await onlineMac(env, server);
+    if (other && (await pickServer(env.DB, token, other))) server = other;
+  }
+  const proxied =
+    request.headers.get("origin") === url.origin ? withOrigin(request, serverOrigin(server, null, env)) : request;
+  const response = await forward(proxied, env, ctx, server, null);
+  if (response.webSocket) return response;
+  const scoped = new Response(response.body, response);
+  scoped.headers.set(MAC_HEADER, server.handle);
+  return scoped;
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const host = url.hostname.toLowerCase();
     if (host === env.BASE_DOMAIN) return apex(request, url, env);
+    if (host === `${APP_HANDLE}.${env.BASE_DOMAIN}`) return phoneApp(request, url, env, ctx);
     const parsed = parseVisitorHost(host, env.BASE_DOMAIN);
     return parsed ? visitor(request, url, env, ctx, parsed) : text("Not found\n", 404);
   },

@@ -135,6 +135,8 @@ describe("toPluginSidebarThread", () => {
       branchName: "bb/feature",
       providerId: "git-worktree",
       workspaceDisplayKind: "managed-worktree",
+      path: null,
+      isWorktree: null,
     });
   });
 

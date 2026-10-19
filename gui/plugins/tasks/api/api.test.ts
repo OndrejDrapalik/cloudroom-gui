@@ -958,6 +958,75 @@ describe("Tasks RPC domain API", () => {
         },
       ],
     });
+    for (const liveStatus of ["starting", "idle", "completed", "failed"] as const) {
+      store.tasks.upsertTaskThread({
+        taskId: createResult.task.id,
+        threadId: `thr_${liveStatus}`,
+        presetName: "Default",
+        title: liveStatus,
+        liveStatus,
+      });
+    }
+    const comment = store.tasks.createComment({
+      taskId: createResult.task.id,
+      kind: "user",
+      authorName: "You",
+      body: "Files",
+    });
+    for (const owner of [
+      { taskId: createResult.task.id },
+      { commentId: comment.id },
+    ]) {
+      store.tasks.createAttachment({
+        ...owner,
+        fileName: "file.txt",
+        mime: "text/plain",
+        sizeBytes: 1,
+        blobPath: "attachments/file.txt",
+        isImage: false,
+      });
+    }
+    const metadata = tasksRpcContract.getTaskMetadata.output.parse(
+      await harness.callRpc("getTaskMetadata", {
+        taskIds: [
+          createResult.task.id,
+          subtask.id,
+          "00000000000000000000000000",
+        ],
+      }),
+    ).metadata;
+    expect(metadata).toEqual([
+      {
+        taskId: createResult.task.id,
+        activeThreads: store.tasks
+          .listTaskThreads(createResult.task.id)
+          .filter((thread) => thread.liveStatus === "starting" || thread.liveStatus === "working"),
+        attachmentCount: 1,
+      },
+      {
+        taskId: subtask.id,
+        activeThreads: store.tasks.listTaskThreads(subtask.id),
+        attachmentCount: 0,
+      },
+      {
+        taskId: "00000000000000000000000000",
+        activeThreads: [],
+        attachmentCount: 0,
+      },
+    ]);
+    await expect(
+      harness.callRpc("getTaskMetadata", { taskIds: [] }),
+    ).resolves.toEqual({ metadata: [] });
+    await expect(
+      harness.callRpc("getTaskMetadata", {
+        taskIds: Array(500).fill(createResult.task.id),
+      }),
+    ).resolves.toEqual({ metadata: [metadata[0]] });
+    await expect(
+      harness.callRpc("getTaskMetadata", {
+        taskIds: Array(501).fill(createResult.task.id),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
     await expect(
       harness.callRpc("deleteProject", { projectId: project.id }),
     ).resolves.toEqual({

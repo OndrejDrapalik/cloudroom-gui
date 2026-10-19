@@ -1,3 +1,4 @@
+import type { ExperimentalPluginBrowserPage } from "@get-bb/plugin-sdk";
 import { PluginSlotMount } from "./PluginSlotMount";
 import { usePluginSlots } from "@/lib/plugin-slots";
 
@@ -37,9 +38,18 @@ export function PluginBrowserToolbarActions({
             tabId={tabId}
             url={url}
             isCompactViewport={isCompactViewport}
+            experimental_page={UNSUPPORTED_BROWSER_PAGE}
           />
         </span>
       </PluginSlotMount>
     );
   });
 }
+
+const UNSUPPORTED_BROWSER_PAGE: ExperimentalPluginBrowserPage = {
+  evaluate: () =>
+    Promise.reject(
+      new Error("experimental_page.evaluate is not supported in Cloudroom yet."),
+    ),
+  onMessage: () => () => {},
+};

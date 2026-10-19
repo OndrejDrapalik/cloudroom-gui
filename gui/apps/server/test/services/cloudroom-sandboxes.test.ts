@@ -10,6 +10,9 @@ import { createTestAppHarness } from "../helpers/test-app.js";
 import { seedHostSession, seedProjectWithSource } from "../helpers/seed.js";
 import { cloudroomThreads, createThread, getThread } from "@cloudroom/db";
 
+// The Cursor key check runs this computer's Cursor CLI, which rejects the tests' fake keys.
+vi.mock("../../src/services/cloudroom/sandboxes.js", async (original) => ({ ...await original<object>(), cursorKeyRejected: async () => false }));
+
 const listen = async (server: ReturnType<typeof createServer>) => {
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const address = server.address(); if (!address || typeof address === "string") throw new Error("fixture did not listen");

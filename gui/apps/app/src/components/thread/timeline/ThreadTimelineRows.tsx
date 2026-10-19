@@ -954,6 +954,7 @@ const ConversationRowContent = memo(function ConversationRowContent({
     role: row.role,
     text: row.text,
     sourceSeqEnd: row.sourceSeqEnd,
+    experimental_messageSeq: row.sourceSeqEnd,
   };
   const rowSlotActions = buildRowPluginMessageActions({
     slots: pluginMessageActions,
@@ -1399,7 +1400,7 @@ function LazyTurnRowBody({
   );
 }
 
-export const PAST_ROW_DIM_CLASS_NAME = "opacity-40";
+export const PAST_ROW_DIM_CLASS_NAME = "dark:opacity-40";
 
 export function pastRowDimClassName({
   activeLatestBundleId,

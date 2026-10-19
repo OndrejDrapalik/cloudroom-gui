@@ -24,6 +24,7 @@ export function runPluginMessageAction({
     threadId,
     message,
     ...(selectedText !== undefined ? { selectedText } : {}),
+    composer: null,
     openPanel: (options) => {
       if (openThreadPanel === undefined) {
         console.warn(

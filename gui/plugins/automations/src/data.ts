@@ -942,6 +942,12 @@ export function createManualRun(
       idempotencyKey: args.idempotencyKey ?? null,
       now: args.now,
     });
+    // A webhook loop has no schedule, so its webhook runs are the runs it counts.
+    if (args.trigger === "webhook") {
+      db.prepare(
+        `UPDATE automations SET last_run_at = @now, run_count = run_count + 1 WHERE id = @automationId`,
+      ).run({ automationId: args.automationId, now: args.now });
+    }
     const run = getAutomationRun(db, runId);
     if (!run) throw new Error("failed to create manual run");
     return { run, deduped: false };

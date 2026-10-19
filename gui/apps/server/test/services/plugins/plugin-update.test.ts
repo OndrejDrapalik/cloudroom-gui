@@ -592,7 +592,7 @@ describe("plugin update service and routes", () => {
   it("returns an actionable 422 and keeps the installed commit for an incompatible candidate", async () => {
     const installedCommit = await git(repo, ["rev-parse", "HEAD"]);
     const incompatibleCommit = await commitPlugin(repo, "2.0.0", {
-      bb: ">=99.0.0",
+      bbPluginSdk: ">=99.0.0",
     });
     const checkResponse = await app.request("/plugins/updates/check", {
       method: "POST",
@@ -606,7 +606,7 @@ describe("plugin update service and routes", () => {
           outcome: "incompatible",
           blocked: {
             version: incompatibleCommit,
-            reasons: [expect.stringContaining("requires Cloudroom >=99.0.0")],
+            reasons: [expect.stringContaining("requires Cloudroom plugin SDK >=99.0.0")],
           },
         },
       ],
@@ -1400,7 +1400,7 @@ describe("plugin update service and routes", () => {
       JSON.stringify({
         name: "bb-plugin-tagged",
         version: "1.2.0",
-        engines: { bb: ">=99.0.0" },
+        engines: { bbPluginSdk: ">=99.0.0" },
         bb: {
           name: "Tagged fixture",
           description: "Tagged release fixture.",
@@ -1444,7 +1444,7 @@ describe("plugin update service and routes", () => {
       JSON.stringify({
         name: "bb-plugin-tagged",
         version: "1.1.0",
-        engines: { bb: ">=99.0.0" },
+        engines: { bbPluginSdk: ">=99.0.0" },
         bb: {
           name: "Tagged fixture",
           description: "Tagged release fixture.",

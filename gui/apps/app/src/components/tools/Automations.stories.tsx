@@ -627,7 +627,7 @@ export const CloudAutomations = () => (
         automation={automation}
         providers={[]}
         now={now}
-        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop }}
+        actions={{ onOpen: noop, onRun: noop, onDelete: noop, onEnabledChange: noop, onNewUrl: noop }}
       />
     ))}
   </StoryCard>

@@ -18,8 +18,8 @@ host, and the command resolves the thread's host automatically.
    sharing defaults to the machine running the Cloudroom server.
 3. Give the returned URL to the user as a markdown link. It opens on the
    user's signed-in phones and browsers; it is not a public internet link.
-   To sign in a new phone, run `room-cli connect phone-code` and give the user
-   the code for cloudroom.dev/mobile.
+   To set up a new phone, send the user to cloudroom.dev/m to sign in
+   (`room-cli connect phone` prints the link).
 4. When the server stops, run `room-cli connect unexpose <port>` from the same
    thread (or with the same `--host`) so the share is cleaned up. Use
    `room-cli connect shares [--host <name-or-id>]` to inspect that host's shares.

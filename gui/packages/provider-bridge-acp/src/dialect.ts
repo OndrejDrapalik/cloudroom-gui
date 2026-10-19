@@ -1,3 +1,4 @@
+import type { ReasoningLevel } from "@cloudroom/domain";
 import type { DeltaItemShape } from "@cloudroom/provider-bridge-protocol";
 import { basename } from "node:path";
 import { z } from "zod";
@@ -6,6 +7,7 @@ import {
   CURSOR_ACP_MAINTENANCE,
   type AcpMaintenanceDialect,
 } from "./bridge/provider-maintenance.js";
+import { OPENCLAW_ACP_DIALECT } from "./openclaw.js";
 import { delegationPresentation } from "./presentation.js";
 import {
   commandRawOutputSchema,
@@ -38,8 +40,26 @@ type AcpCompactionOutcome =
   | { status: "skipped"; detail: string }
   | { status: "failed"; error: string };
 
+export interface AcpSessionOpening {
+  command: string;
+  env: Record<string, string | undefined>;
+  cwd: string;
+  fullAccess: boolean;
+  model?: string | undefined;
+  reasoningLevel?: ReasoningLevel | undefined;
+  resumeId?: string | undefined;
+}
+
 export interface AcpDialect {
   readonly id: string;
+  prepareLaunch?(
+    command: string,
+    env: Record<string, string | undefined>,
+  ): Promise<void>;
+  openSession?(opening: AcpSessionOpening): Promise<string>;
+  sessionMcpServers?: false;
+  hidesModel?(id: string): boolean;
+  emptyTurnError?: string;
   toolIdentity?(event: AcpToolCallUpdateEvent): AcpToolIdentity | undefined;
   classifyToolCall?(
     event: AcpToolCallUpdateEvent,
@@ -435,6 +455,7 @@ const DIALECTS_BY_ID: ReadonlyMap<string, AcpDialect> = new Map([
   [FX_ACP_DIALECT.id, FX_ACP_DIALECT],
   [OMP_ACP_DIALECT.id, OMP_ACP_DIALECT],
   [OPENCODE_ACP_DIALECT.id, OPENCODE_ACP_DIALECT],
+  [OPENCLAW_ACP_DIALECT.id, OPENCLAW_ACP_DIALECT],
 ]);
 
 const DIALECT_IDS_BY_COMMAND: Readonly<Record<string, string>> = {
@@ -443,6 +464,7 @@ const DIALECT_IDS_BY_COMMAND: Readonly<Record<string, string>> = {
   fx: FX_ACP_DIALECT.id,
   omp: OMP_ACP_DIALECT.id,
   opencode: OPENCODE_ACP_DIALECT.id,
+  openclaw: OPENCLAW_ACP_DIALECT.id,
 };
 
 export function resolveAcpDialect(launch: {

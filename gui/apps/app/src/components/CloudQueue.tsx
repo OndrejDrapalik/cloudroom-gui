@@ -53,28 +53,32 @@ export function CloudQueueCard({ queue, onUseLocal }: { queue: CloudQueue; onUse
   );
 }
 
-export function FreePlanCard() {
+const share = (used: number, limit: number) => limit > 0 ? Math.min(used / limit, 1) : 1;
+
+/** Free accounts always see their usage. Pro accounts already pay, so theirs shows only once a limit is 80% used. */
+export function PlanCard() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
   if (!usage) return null;
+  const pro = usage.plan === "pro";
   const rows = [
     { label: "cloud agents", used: usage.agents, limit: usage.agentsLimit },
     ...(usage.cpuHours === null ? [] : [{ label: "cloud hours", used: usage.cpuHours, limit: usage.cpuHoursLimit }]),
   ];
+  if (pro && !rows.some(({ used, limit }) => share(used, limit) >= 0.8)) return null;
   return (
-    <section aria-label="Free plan" className="rounded-lg border border-border bg-surface-raised-solid p-3">
-      <p className="text-xs text-muted-foreground">Free plan</p>
+    <section aria-label={pro ? "Pro plan" : "Free plan"} className="rounded-lg border border-border bg-surface-raised-solid p-3">
+      <p className="text-xs text-muted-foreground">{pro ? "Pro plan" : "Free plan"}</p>
       {rows.map(({ label, used, limit }) => {
-        const share = limit > 0 ? Math.min(used / limit, 1) : 1;
-        const low = share >= 0.8;
+        const low = share(used, limit) >= 0.8;
         return (
           <div key={label} className="mt-2.5">
             <p className="mb-1.5 text-sm text-foreground"><span className={cn("font-semibold", low && "text-warning")}>{Math.max(0, Math.floor(limit - used)).toLocaleString("en-US")}</span> {label} left</p>
-            <div className="h-1 overflow-hidden rounded-full bg-foreground/10"><div className={cn("h-full rounded-full", low ? "bg-warning" : "bg-primary")} style={{ width: `${share * 100}%` }} /></div>
+            <div className="h-1 overflow-hidden rounded-full bg-foreground/10"><div className={cn("h-full rounded-full", low ? "bg-warning" : "bg-primary")} style={{ width: `${share(used, limit) * 100}%` }} /></div>
           </div>
         );
       })}
-      <Button type="button" size="sm" className="mt-3 w-full" onClick={upgrade}>
-        Get 10× more with Pro<span className="ml-auto font-normal opacity-70">$50/mo</span><Icon name="ArrowRight" aria-hidden />
+      <Button type="button" size="sm" variant={pro ? "outline" : "default"} className="mt-3 w-full" onClick={upgrade}>
+        {pro ? "Get 3× more with Super" : "Get 10× more with Pro"}<span className="ml-auto font-normal opacity-70">{pro ? "$150/mo" : "$50/mo"}</span><Icon name="ArrowRight" aria-hidden />
       </Button>
     </section>
   );
@@ -95,7 +99,7 @@ const nextReason = () => PRO_REASONS[(lastReason = (lastReason + 1) % PRO_REASON
 export function FreePlanTip() {
   const usage = useCloudroomAccount().data?.planUsage ?? null;
   const [reason] = useState(nextReason);
-  if (!usage) return null;
+  if (usage?.plan !== "free") return null;
   return (
     <p className="mt-3 flex min-w-0 items-center gap-2 px-3.5 text-xs text-muted-foreground">
       <Icon name="Zap" className="size-3.5 shrink-0 text-primary-text" aria-hidden />

@@ -25,6 +25,7 @@ import type {
 } from "../services/plugins/plugin-api.js";
 import { PluginSettingsValidationError } from "../services/plugins/plugin-settings.js";
 import { BUNDLED_PLUGINS } from "../services/plugins/builtin-registry.js";
+import { PLUGIN_RPC_CALLER_HEADER } from "../services/plugins/plugin-rpc-caller.js";
 import {
   createAppAssetCompressionCache,
   type AppAssetCompressionCache,
@@ -38,6 +39,7 @@ import {
   pluginApplyUpdateRequestSchema,
   pluginRpcDiscoveryQuerySchema,
   pluginInstallRequestSchema,
+  pluginSafeModeRequestSchema,
   pluginSettingsUpdateRequestSchema,
   pluginTokenRequestSchema,
   pluginUpdateCheckRequestSchema,
@@ -645,6 +647,22 @@ export function registerPluginRoutes(
     return context.json(outcome);
   });
 
+  app.get("/plugins/safe-mode", (context) =>
+    context.json({ enabled: plugins.getSafeMode() }),
+  );
+
+  app.put("/plugins/safe-mode", async (context) => {
+    const json: unknown = await context.req.json().catch(() => null);
+    const body = pluginSafeModeRequestSchema.safeParse(json);
+    if (!body.success) {
+      return context.json(
+        { ok: false, error: "expected { enabled: boolean }" },
+        400,
+      );
+    }
+    return context.json(await plugins.setSafeMode(body.data.enabled));
+  });
+
   app.post("/plugins/:id/enable", async (context) => {
     const plugin = await plugins.setEnabled(context.req.param("id"), true);
     if (!plugin)
@@ -827,6 +845,18 @@ export function registerPluginRoutes(
         );
       }
     }
+    const callerResolution = plugins.resolveRpcCaller(
+      context.req.header(PLUGIN_RPC_CALLER_HEADER),
+    );
+    if (!callerResolution.ok) {
+      return context.json(
+        {
+          ok: false,
+          error: `the ${PLUGIN_RPC_CALLER_HEADER} token isn't a running plugin's caller token`,
+        },
+        403,
+      );
+    }
     const lookup = plugins.getRpcHandler(id, method);
     if (lookup.outcome === "unknown-plugin") {
       return context.json({ ok: false, error: `unknown plugin "${id}"` }, 404);
@@ -854,6 +884,7 @@ export function registerPluginRoutes(
       method,
       lookup.value,
       input,
+      callerResolution.caller,
     );
     if (!outcome.ok) {
       return context.json(

@@ -28,7 +28,7 @@ import { getRootComposeRoutePath, getThreadRoutePath } from "@/lib/route-paths";
 import { usePaneContentSplitDrag } from "./usePaneContentSplitDrag";
 import { CloudroomSignInButton } from "./CloudroomSignInButton";
 import { MacAccessChip } from "./MacAccessChip";
-import { CloudQueueChip, FreePlanCard } from "@/components/CloudQueue";
+import { CloudQueueChip, PlanCard } from "@/components/CloudQueue";
 import {
   EMPTY_SIDEBAR_THREAD_SHORTCUT_KEYS,
   getSidebarThreadNavigationTargets,
@@ -272,7 +272,7 @@ export function AppSidebar({
           item={pluginSidebarFooter.activeItem}
           onDismiss={pluginSidebarFooter.dismiss}
         />
-        <FreePlanCard />
+        <PlanCard />
         <SidebarMenu className="flex-row flex-wrap-reverse items-center gap-1">
           <PluginSidebarFooterItems
             activeDisclosureKey={pluginSidebarFooter.activeKey}

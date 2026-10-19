@@ -34,6 +34,7 @@ import {
   createPluginService,
   type PluginService,
 } from "./services/plugins/plugin-service.js";
+import { bbCompatAppVersion } from "./services/plugins/sdk-compat.js";
 import { setPluginAgentContributions } from "./services/plugins/plugin-agent-contributions.js";
 import { setPluginThreadEventEmitter } from "./services/plugins/plugin-thread-events.js";
 import { setPluginHookProvider } from "./services/plugins/plugin-hook-registry.js";
@@ -582,7 +583,7 @@ export function createApp(
     telemetry: deps.telemetry,
     pendingInteractions: deps.pendingInteractions,
     dataDir: deps.config.dataDir,
-    appVersion: deps.config.appVersion,
+    appVersion: bbCompatAppVersion(deps.config.appVersion),
     getAppUrl: () => deps.config.appUrl ?? null,
     sharedPorts: deps.sharedPorts,
     providerRegistry: deps.providerRegistry,
@@ -664,7 +665,7 @@ export function createApp(
   });
   const pluginCatalogService = createPluginCatalogService({
     db: deps.db,
-    appVersion: deps.config.appVersion,
+    appVersion: bbCompatAppVersion(deps.config.appVersion),
     marketplaceUrl: deps.config.marketplaceUrl,
     dataDir: deps.config.dataDir,
     plugins: pluginService,

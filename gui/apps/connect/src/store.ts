@@ -22,6 +22,7 @@ export interface Server {
 export interface Session {
   serverId: string;
   target: string | null;
+  userId: string | null;
 }
 
 interface Cached<T> {
@@ -268,6 +269,7 @@ export async function createCode(
   serverId: string,
   target: string | null,
   ttlMs: number,
+  userId: string | null = null,
 ): Promise<{ code: string; expiresAt: number }> {
   const now = Date.now();
   const code = randomString(CODE_ALPHABET, 8);
@@ -276,9 +278,9 @@ export async function createCode(
     db.prepare("DELETE FROM code WHERE expires_at < ?").bind(now),
     db
       .prepare(
-        "INSERT INTO code (code_hash, server_id, target, expires_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO code (code_hash, server_id, target, expires_at, user_id) VALUES (?, ?, ?, ?, ?)",
       )
-      .bind(await sha256Hex(code), serverId, target, expiresAt),
+      .bind(await sha256Hex(code), serverId, target, expiresAt, userId),
   ]);
   return { code, expiresAt };
 }
@@ -301,14 +303,14 @@ export async function consumeCode(
   code: string,
   serverId: string,
   target: string | null,
-): Promise<boolean> {
+): Promise<{ userId: string | null } | null> {
   const row = await db
     .prepare(
-      "DELETE FROM code WHERE code_hash = ? AND server_id = ? AND target IS ? AND expires_at > ? RETURNING server_id",
+      "DELETE FROM code WHERE code_hash = ? AND server_id = ? AND target IS ? AND expires_at > ? RETURNING user_id",
     )
     .bind(await sha256Hex(code), serverId, target, Date.now())
-    .first<{ server_id: string }>();
-  return row !== null;
+    .first<{ user_id: string | null }>();
+  return row ? { userId: row.user_id } : null;
 }
 
 export async function createSession(
@@ -316,6 +318,7 @@ export async function createSession(
   serverId: string,
   target: string | null,
   ttlMs = SESSION_TTL_MS,
+  userId: string | null = null,
 ): Promise<string> {
   const now = Date.now();
   const token = randomToken();
@@ -323,9 +326,9 @@ export async function createSession(
     db.prepare("DELETE FROM session WHERE expires_at < ?").bind(now),
     db
       .prepare(
-        "INSERT INTO session (token_hash, server_id, target, expires_at, created_at) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO session (token_hash, server_id, target, expires_at, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .bind(await sha256Hex(token), serverId, target, now + ttlMs, now),
+      .bind(await sha256Hex(token), serverId, target, now + ttlMs, now, userId),
   ]);
   return token;
 }
@@ -336,11 +339,19 @@ export async function sessionByToken(
 ): Promise<Session | null> {
   const row = await db
     .prepare(
-      "SELECT server_id, target FROM session WHERE token_hash = ? AND expires_at > ?",
+      "SELECT server_id, target, user_id FROM session WHERE token_hash = ? AND expires_at > ?",
     )
     .bind(await sha256Hex(token), Date.now())
-    .first<{ server_id: string; target: string | null }>();
-  return row ? { serverId: row.server_id, target: row.target } : null;
+    .first<{ server_id: string; target: string | null; user_id: string | null }>();
+  return row ? { serverId: row.server_id, target: row.target, userId: row.user_id } : null;
+}
+
+export async function pickServer(db: D1Database, token: string, server: Server): Promise<boolean> {
+  const result = await db
+    .prepare("UPDATE session SET server_id = ? WHERE token_hash = ? AND user_id = ? AND target IS NULL")
+    .bind(server.id, await sha256Hex(token), server.userId)
+    .run();
+  return result.meta.changes === 1;
 }
 
 export async function phoneUser(db: D1Database, token: string): Promise<string | null> {
@@ -353,13 +364,18 @@ export async function phoneUser(db: D1Database, token: string): Promise<string |
   return row?.user_id ?? null;
 }
 
-export async function revokeSessions(
-  db: D1Database,
-  serverId: string,
-): Promise<number> {
+export async function accountHandles(db: D1Database, userId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare("SELECT handle FROM server WHERE user_id = ?")
+    .bind(userId)
+    .all<{ handle: string }>();
+  return results.map((row) => row.handle);
+}
+
+export async function revokeSessions(db: D1Database, server: Server): Promise<number> {
   const result = await db
-    .prepare("DELETE FROM session WHERE server_id = ?")
-    .bind(serverId)
+    .prepare("DELETE FROM session WHERE server_id = ? OR user_id = ?")
+    .bind(server.id, server.userId)
     .run();
   return result.meta.changes;
 }

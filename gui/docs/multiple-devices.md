@@ -13,8 +13,8 @@ You can use either story independently or combine them.
 
 The simplest managed route is **Cloudroom Connect**. Once you are signed in to
 Cloudroom, the server registers itself with our relay at cloudroom.run, holds the
-tunnel, and reconnects after restart. Get a one-time code in Settings → Cloudroom
-Connect (or `room-cli connect phone-code`) and enter it at cloudroom.dev/mobile.
+tunnel, and reconnects after restart. On a phone, open cloudroom.dev/m and sign in
+with your Cloudroom account (`room-cli connect phone` prints the link).
 
 For a private tailnet route, keep bb on its loopback default and publish it
 through Tailscale Serve:
@@ -86,9 +86,9 @@ Phones and tablets need no helper; editor-launch actions are simply unavailable.
 
 ## Use Cloudroom on your phone
 
-The phone runs the same Cloudroom app as a PWA. Open cloudroom.dev/mobile and
-enter the code from Settings → Cloudroom Connect, or scan its QR code. Then use
-Add to Home Screen. Settings → Cloudroom Connect → Sign out all phones ends every
+The phone runs the same Cloudroom app as a PWA, at app.cloudroom.run. Open
+cloudroom.dev/m, or scan the QR code in Settings → Cloudroom Connect, sign in, and
+tap Open Cloudroom. Then use Add to Home Screen. Settings → Cloudroom Connect → Sign out all phones ends every
 phone session.
 
 ### Push notifications on a self-hosted server
