@@ -32,6 +32,11 @@ export default defineConfig({
         ws: true,
         xfwd: true,
       },
+      "/cloudroom/return": {
+        target: viteDevConfig.serverHttpOrigin,
+        changeOrigin: false,
+        xfwd: true,
+      },
     },
   },
 });

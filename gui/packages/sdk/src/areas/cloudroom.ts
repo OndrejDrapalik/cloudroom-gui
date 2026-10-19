@@ -37,6 +37,8 @@ export interface CloudroomStatus {
   localLogins?: { codex: boolean };
   signingIn: boolean;
   signInError: string | null;
+  /** Where the browser lands after signing in on the website: a 127.0.0.1 URL on this server's port, at the path the website allows. From another machine, forward that port first. */
+  signInCallback?: string;
   /** The account's place in the cloud queue, or a blocked region: new Cloud threads wait. Null when it may start them. */
   cloudQueue?: { position: number; total: number; regionBlocked: boolean } | null;
   /** A Free or Pro account's 30-day usage, for the sidebar upgrade card. Null for other plans or while in the cloud queue. */

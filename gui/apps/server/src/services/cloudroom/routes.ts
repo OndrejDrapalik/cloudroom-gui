@@ -5,7 +5,7 @@ import { getThread } from "@cloudroom/db";
 import { z } from "zod";
 import { threadGoalSetRequestSchema } from "@cloudroom/server-contract";
 import { cloudroom, isCloudThread } from "./commands.js";
-import { cloudroomAccount } from "./account.js";
+import { cloudroomAccount, RETURN_PATH } from "./account.js";
 import { macAccess, macAccessLevels, setMacAccess } from "./previews.js";
 import { cloudSkills, copyLogins, setCloudSkills, setCopyLogins, skillInCloud } from "./sync.js";
 import { secondsSinceFirstLaunch } from "./setup-telemetry.js";
@@ -398,6 +398,10 @@ export function installCloudroomRoutes(app: Hono, deps: AppDeps): void {
     });
   }
   app.post("/api/v1/cloudroom/account/sign-in", async (context) => context.json(await cloudroomAccount(deps).signIn(await context.req.json())));
+  app.get(RETURN_PATH, async (context) => {
+    const reply = await cloudroomAccount(deps).handleReturn({ method: context.req.method, url: context.req.url, host: context.req.header("host") });
+    return context.html(reply.html, reply.status as 200, reply.headers);
+  });
   app.post("/api/v1/cloudroom/account/cancel", (context) => { cloudroomAccount(deps).cancel(); return context.json({ ok: true }); });
   app.post("/api/v1/cloudroom/account/logout", async (context) => { await cloudroomAccount(deps).logout(); return context.json({ ok: true }); });
   app.get("/api/v1/cloudroom", async (context) => context.json(await cloudroom(deps).status()));

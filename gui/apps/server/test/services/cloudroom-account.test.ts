@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cloudroomThreads, threads } from "@cloudroom/db";
 import { eq } from "drizzle-orm";
 import { cloudroom } from "../../src/services/cloudroom/commands.js";
 import { cloudroomAccount, CloudroomAccountService, pendingLoginTimeoutMs } from "../../src/services/cloudroom/account.js";
+import { registerStaticAppRoutes } from "../../src/server.js";
 import { createTestAppHarness } from "../helpers/test-app.js";
 import { seedHostSession, seedProjectWithSource, seedThread } from "../helpers/seed.js";
 
@@ -20,8 +21,16 @@ const listen = async (server: Server) => {
 };
 const close = async (server: Server) => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); };
 
-it("pairs through a loopback callback, keeps secrets out of status, persists/reconnects, and signs out without touching history or the VM", async () => {
+beforeEach(() => { vi.stubEnv("CLOUDROOM_SIGNIN_PORT", undefined); });
+afterEach(() => { vi.unstubAllEnvs(); });
+
+it.each([undefined, "1355"])("pairs through a loopback callback with port override %s, keeps secrets out of status, persists/reconnects, and signs out without touching history or the VM", async (portOverride) => {
+  vi.stubEnv("CLOUDROOM_SIGNIN_PORT", portOverride);
   const harness = await createTestAppHarness();
+  const callbackPort = portOverride ?? harness.deps.config.serverPort;
+  const shell = "<!doctype html><title>Cloudroom static app</title>";
+  await writeFile(join(harness.deps.config.dataDir, "index.html"), shell);
+  registerStaticAppRoutes(harness.app, harness.deps.config.dataDir);
   const { host } = seedHostSession(harness.deps);
   const { project } = seedProjectWithSource(harness.deps, { hostId: host.id });
   const account = cloudroomAccount(harness.deps);
@@ -77,17 +86,28 @@ it("pairs through a loopback callback, keeps secrets out of status, persists/rec
     expect(url.href).not.toContain(gateToken);
     return url;
   };
-  const finish = (url: URL, state = url.searchParams.get("state")!) => fetch(`${url.searchParams.get("callback")}?${new URLSearchParams({ code: "c".repeat(64), state })}`);
+  // The website sends the browser back to this server's own loopback port; the test drives that route in-process.
+  const returnRequest = (url: URL, init: { method?: string; query?: URLSearchParams; body?: BodyInit } = {}) => {
+    const callback = new URL(url.searchParams.get("callback")!);
+    expect(callback.href).toBe(`http://127.0.0.1:${callbackPort}/cloudroom/return`);
+    return harness.app.request(`${callback.pathname}${init.query ? `?${init.query}` : ""}`, { method: init.method ?? "GET", headers: { host: callback.host, origin: websiteUrl }, ...(init.body === undefined ? {} : { body: init.body }) });
+  };
+  const finish = (url: URL, state = url.searchParams.get("state")!) => returnRequest(url, { query: new URLSearchParams({ code: "c".repeat(64), state }) });
   const savedPath = join(harness.deps.config.dataDir, "cloudroom.json");
   try {
+    expect(await (await harness.app.request("/threads/example")).text()).toBe(shell);
     expect((await request("/sign-in", { projectId: project.id }, { Origin: "https://attacker.invalid" })).status).toBe(403);
     await expect(account.signIn({ projectId: project.id, websiteUrl: "https://attacker.invalid" })).rejects.toThrow("Cloudroom website");
     const url = await start();
-    expect((await request("").then(r => r.json())).signingIn).toBe(true);
+    expect(await request("").then(r => r.json())).toMatchObject({ signingIn: true, signInCallback: `http://127.0.0.1:${callbackPort}/cloudroom/return` });
     const rejected = await finish(url, "d".repeat(64));
     expect(rejected.status).toBe(400);
     expect(await rejected.text()).toContain("<h1>Sign-in not completed</h1>");
-    expect((await fetch(url.searchParams.get("callback")!, { method: "POST", body: new URLSearchParams({ code: "c".repeat(64), state: url.searchParams.get("state")! }) })).status).toBe(400);
+    expect((await returnRequest(url, { method: "POST", body: new URLSearchParams({ code: "c".repeat(64), state: url.searchParams.get("state")! }) })).status).not.toBe(200);
+    expect((await harness.app.request(`/cloudroom/return?${new URLSearchParams({ code: "c".repeat(64), state: url.searchParams.get("state")! })}`, { headers: { host: "cloudroom.localhost" } })).status).not.toBe(200);
+    if (portOverride !== undefined) {
+      expect((await harness.app.request(`/cloudroom/return?${new URLSearchParams({ code: "c".repeat(64), state: url.searchParams.get("state")! })}`, { headers: { host: `127.0.0.1:${harness.deps.config.serverPort}` } })).status).toBe(400);
+    }
     expect(redeemed).toBe(0);
     const callbackResponse = await finish(url);
     expect(callbackResponse.status).toBe(200);
@@ -111,7 +131,7 @@ it("pairs through a loopback callback, keeps secrets out of status, persists/rec
     expect(JSON.stringify(status)).not.toContain(gateToken);
     expect((await stat(savedPath)).mode & 0o777).toBe(0o600);
     expect(await new CloudroomAccountService(harness.deps).status()).toMatchObject({ account: owners[0], ready: true });
-    await expect(finish(url)).rejects.toThrow();
+    expect((await finish(url)).status).toBe(400);
     expect(redeemed).toBe(1);
     offline = true;
     expect(await account.status()).toMatchObject({ ready: false, account: owners[0] });
@@ -144,11 +164,11 @@ it("pairs through a loopback callback, keeps secrets out of status, persists/rec
 
     const cancelled = await start();
     expect((await request("/cancel", {})).status).toBe(200);
-    await expect(finish(cancelled)).rejects.toThrow();
+    expect((await finish(cancelled)).status).toBe(400);
     let release!: () => void;
     redemptionDelay = new Promise<void>(resolve => { release = resolve; });
     const inFlightUrl = await start();
-    const inFlight = finish(inFlightUrl).catch(() => null);
+    const inFlight = Promise.resolve(finish(inFlightUrl)).catch(() => null);
     await expect.poll(() => redeemed).toBe(4);
     expect((await finish(inFlightUrl)).status).toBe(400);
     expect((await account.status()).signingIn).toBe(true);
@@ -186,6 +206,8 @@ it("keeps browser sign-in open while a VM is provisioned and does not call the w
     expect(pendingLoginTimeoutMs).not.toBe(5 * 60_000);
     const started = await account.signIn({ websiteUrl: "http://127.0.0.1:9" });
     expect(started.url).toContain("/desktop?");
+    expect(started.callback).toBe(`http://127.0.0.1:${harness.deps.config.serverPort}/cloudroom/return`);
+    expect((await account.status()).signInCallback).toBe(started.callback);
     expect(expire).toBeTypeOf("function");
     expect((await account.status()).signingIn).toBe(true);
     account.cancel();
@@ -200,6 +222,42 @@ it("keeps browser sign-in open while a VM is provisioned and does not call the w
   } finally {
     globalThis.fetch = realFetch;
     globalThis.setTimeout = realTimeout;
+    account.cancel();
+    await harness.cleanup();
+  }
+});
+
+it.each([
+  { portOverride: "80", serverPort: 3334 },
+  { portOverride: "0", serverPort: 3334 },
+  { portOverride: "65536", serverPort: 3334 },
+  { portOverride: "1.5", serverPort: 3334 },
+  { portOverride: "", serverPort: 3334 },
+  { portOverride: "invalid", serverPort: 3334 },
+  { portOverride: undefined, serverPort: 80 },
+  { portOverride: undefined, serverPort: 0 },
+  { portOverride: undefined, serverPort: 65536 },
+])("rejects invalid callback ports before starting sign-in: %j", async ({ portOverride, serverPort }) => {
+  vi.stubEnv("CLOUDROOM_SIGNIN_PORT", portOverride);
+  const harness = await createTestAppHarness({ serverPort });
+  const account = cloudroomAccount(harness.deps);
+  try {
+    const response = await harness.app.request("/api/v1/cloudroom/account/sign-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ websiteUrl: "http://127.0.0.1:9" }),
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "cloudroom_signin_unavailable", message: expect.stringContaining("CLOUDROOM_SIGNIN_PORT") });
+    const status = await harness.app.request("/api/v1/cloudroom/account");
+    expect(status.status).toBe(200);
+    const body = await status.json();
+    expect(body).toMatchObject({ signingIn: false, signInError: expect.stringContaining("CLOUDROOM_SIGNIN_PORT") });
+    expect(body).not.toHaveProperty("signInCallback");
+    const callback = await harness.app.request("/cloudroom/return", { headers: { host: "127.0.0.1:1355" } });
+    expect(callback.status).toBe(400);
+    expect(await callback.text()).toContain("Sign-in not completed");
+  } finally {
     account.cancel();
     await harness.cleanup();
   }

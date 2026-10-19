@@ -1,5 +1,4 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { createServer, type Server } from "node:http";
 import { z } from "zod";
 import { getProject, type DbConnection } from "@cloudroom/db";
 import type { AppDeps } from "../../types.js";
@@ -20,7 +19,18 @@ const handoffSchema = z.object({
   sandboxes: z.object({ token: z.string().regex(/^[a-f0-9]{64}$/) }).strict().optional(),
 }).strict().refine((handoff) => handoff.connection || handoff.sandboxes, "A VM connection or cloud sandboxes are required.");
 type Deps = Pick<AppDeps, "db" | "hub" | "config" | "providerRegistry">;
-type Pending = { server: Server; abort: AbortController; timer: ReturnType<typeof setTimeout>; claimed: boolean };
+type Pending = { state: string; verifier: string; origin: URL; callback: string; projectId?: string; abort: AbortController; timer: ReturnType<typeof setTimeout>; claimed: boolean };
+type ReturnReply = { status: number; headers: Record<string, string>; html: string };
+/** The browser returns here, on this server's own loopback port, after signing in on the website. The website accepts only this path on 127.0.0.1. */
+export const RETURN_PATH = "/cloudroom/return";
+function signInPort(serverPort: number): number {
+  const configured = process.env.CLOUDROOM_SIGNIN_PORT;
+  const port = configured === undefined ? serverPort : Number(configured);
+  if (!Number.isInteger(port) || port < 1 || port > 65535 || port === 80) {
+    throw new ApiError(503, "cloudroom_signin_unavailable", "Cloudroom sign-in requires a callback port from 1 to 65535 other than 80. Set CLOUDROOM_SIGNIN_PORT to the server port or a port forwarded to it.");
+  }
+  return port;
+}
 const accounts = new WeakMap<DbConnection, CloudroomAccountService>();
 
 function callbackPage(success: boolean, message: string, nonce: string): string {
@@ -54,25 +64,28 @@ export function cloudroomAccount(deps: Deps) {
 export class CloudroomAccountService {
   private pending: Pending | null = null;
   private error: string | null = null;
-  private attempt = 0;
   constructor(private readonly deps: Deps) {}
 
   async status() {
     const status = await cloudroom(this.deps).status();
     const macAccessLevel = await macAccess(this.deps);
-    return { ...status, macAccess: macAccessLevel === null ? null : macAccessLevel !== "off", macAccessLevel, copyLogins: await copyLogins(this.deps), localLogins: { codex: await hasMacCodexLogin() }, signingIn: this.pending !== null, signInError: this.error };
+    let signInCallback: string | undefined;
+    let signInError = this.error;
+    try { signInCallback = this.pending?.callback ?? this.callbackUrl(); }
+    catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      signInError = error.message;
+    }
+    return { ...status, macAccess: macAccessLevel === null ? null : macAccessLevel !== "off", macAccessLevel, copyLogins: await copyLogins(this.deps), localLogins: { codex: await hasMacCodexLogin() }, signingIn: this.pending !== null, signInError, signInCallback };
   }
 
 
   cancel(): void {
-    this.attempt++;
     const pending = this.pending;
     this.pending = null;
     if (pending) {
       clearTimeout(pending.timer);
       pending.abort.abort();
-      pending.server.close();
-      pending.server.closeAllConnections();
     }
     this.error = null;
   }
@@ -83,88 +96,87 @@ export class CloudroomAccountService {
     await cloudroom(this.deps).disconnect();
   }
 
-  async signIn(raw: unknown): Promise<{ url: string }> {
+  /** Where the browser lands after the website sign-in: this server's own loopback port by default. CLOUDROOM_SIGNIN_PORT names another loopback port the browser's machine relays here (a tunnel or proxy) when Cloudroom runs elsewhere. */
+  callbackUrl(): string {
+    return `http://127.0.0.1:${signInPort(this.deps.config.serverPort)}${RETURN_PATH}`;
+  }
+
+  async signIn(raw: unknown): Promise<{ url: string; callback: string }> {
     const input = signInSchema.parse(raw);
     if (input.projectId && !getProject(this.deps.db, input.projectId)) throw new ApiError(404, "project_not_found", "Project not found.");
     const origin = new URL(input.websiteUrl ?? configuredWebsite());
     if (origin.href !== `${origin.origin}/` || !trustedWebsite(origin.origin)) throw new ApiError(400, "invalid_request", "Use the Cloudroom website or an explicit loopback development server.");
+    const callback = this.callbackUrl();
     this.cancel();
-    const attempt = this.attempt;
     const state = randomBytes(32).toString("hex");
     const verifier = randomBytes(32).toString("hex");
     const challenge = createHash("sha256").update(verifier).digest("hex");
-    const abort = new AbortController();
-    let callback = "";
-    const server = createServer(async (request, response) => {
-      const reply = (status: number, message: string) => {
-        const nonce = randomBytes(16).toString("hex");
-        response.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": `default-src 'none'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` });
-        response.end(callbackPage(status === 200, message, nonce));
+    const pending: Pending = { state, verifier, origin, callback, projectId: input.projectId, abort: new AbortController(), timer: setTimeout(() => {}, 0), claimed: false };
+    pending.timer = setTimeout(() => { if (this.pending === pending) { this.cancel(); this.error = "Sign-in expired. Try again."; reportSignInFailed(this.error); } }, pendingLoginTimeoutMs);
+    pending.timer.unref();
+    this.pending = pending;
+    return { url: `${origin.origin}/desktop?${new URLSearchParams({ callback, state, challenge, ...(input.provider ? { provider: input.provider } : {})})}`, callback };
+  }
+
+  /** Handles the browser's return from the website. A plain GET navigation: Safari warns when an https page posts a form to http, even 127.0.0.1. The state and verifier still bind it to this app. */
+  async handleReturn(request: { method: string; url: string; host: string | undefined }): Promise<ReturnReply> {
+    const reply = (status: number, message: string): ReturnReply => {
+      const nonce = randomBytes(16).toString("hex");
+      return {
+        status,
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": `default-src 'none'; style-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` },
+        html: callbackPage(status === 200, message, nonce),
       };
-      // A plain GET navigation: Safari warns when an https page posts a form to http, even 127.0.0.1. The state and verifier still bind it to this app.
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
-      if (request.method !== "GET" || url.pathname !== "/cloudroom/return" || request.url!.length > 512 || request.headers.host !== new URL(callback).host) return reply(400, "Invalid sign-in callback. Return to Cloudroom.");
-      let claimed = false;
-      try {
-        const receivedState = url.searchParams.get("state") ?? "";
-        const code = url.searchParams.get("code") ?? "";
-        const pending = this.pending;
-        if (!/^[a-f0-9]{64}$/.test(receivedState) || !timingSafeEqual(Buffer.from(receivedState), Buffer.from(state)) || !/^[a-f0-9]{64}$/.test(code) || pending?.server !== server || pending.claimed) return reply(400, "Sign-in expired or did not match this app.");
-        pending.claimed = true;
-        claimed = true;
-        const exchanged = await fetch(`${origin.origin}/api/desktop/redeem`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, verifier }),
-          redirect: "error", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
-        });
-        if (!exchanged.ok) {
-          await exchanged.body?.cancel();
-          throw new ApiError(503, "cloudroom_signin_failed", exchanged.status === 401 ? "Sign-in expired or was already used. Try again." : "Cloudroom could not verify your account and existing VM. Try again or contact your administrator.");
-        }
-        const reader = exchanged.body?.getReader();
-        if (!reader) throw new Error("Empty handoff");
-        const chunks: Uint8Array[] = [];
-        let size = 0;
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            size += value.length;
-            if (size > 16384) throw new Error("Invalid handoff");
-            chunks.push(value);
-          }
-        } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-        const handoff = handoffSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-        abort.signal.throwIfAborted();
-        await cloudroom(this.deps).configure(handoff.connection ? { ...handoff.connection, projectId: input.projectId } : null, handoff.account, abort.signal, origin.origin, handoff.sandboxes?.token);
-        linkInstall();
-        reply(200, "You’re done here. Everything else happens in the Cloudroom app.");
-      } catch (error) {
-        if (!abort.signal.aborted) {
-          this.error = error instanceof ApiError ? error.message : "Sign-in could not complete. Start again from Cloudroom.";
-          reportSignInFailed(error instanceof Error ? error.message : String(error));
-          reply(400, this.error);
-        }
-      } finally {
-        if (claimed && this.pending?.server === server) {
-          clearTimeout(this.pending.timer);
-          this.pending = null;
-          server.close();
-        }
+    };
+    const url = new URL(request.url, "http://127.0.0.1");
+    const pending = this.pending;
+    if (request.method !== "GET" || url.pathname !== RETURN_PATH || `${url.pathname}${url.search}`.length > 512) return reply(400, "Invalid sign-in callback. Return to Cloudroom.");
+    if (!pending) return reply(400, "Sign-in expired or did not match this app.");
+    if (request.host !== new URL(pending.callback).host) return reply(400, "Invalid sign-in callback. Return to Cloudroom.");
+    let claimed = false;
+    try {
+      const receivedState = url.searchParams.get("state") ?? "";
+      const code = url.searchParams.get("code") ?? "";
+      if (!pending || pending.claimed || !/^[a-f0-9]{64}$/.test(receivedState) || !timingSafeEqual(Buffer.from(receivedState), Buffer.from(pending.state)) || !/^[a-f0-9]{64}$/.test(code)) return reply(400, "Sign-in expired or did not match this app.");
+      pending.claimed = true;
+      claimed = true;
+      const { origin, abort } = pending;
+      const exchanged = await fetch(`${origin.origin}/api/desktop/redeem`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, verifier: pending.verifier }),
+        redirect: "error", signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
+      });
+      if (!exchanged.ok) {
+        await exchanged.body?.cancel();
+        throw new ApiError(503, "cloudroom_signin_failed", exchanged.status === 401 ? "Sign-in expired or was already used. Try again." : "Cloudroom could not verify your account and existing VM. Try again or contact your administrator.");
       }
-    });
-    server.requestTimeout = 20_000;
-    server.headersTimeout = 10_000;
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
-    if (attempt !== this.attempt) { server.close(); throw new ApiError(409, "cloudroom_signin_cancelled", "Sign-in was cancelled or replaced."); }
-    const address = server.address();
-    if (!address || typeof address === "string") { server.close(); throw new Error("Sign-in callback unavailable"); }
-    callback = `http://127.0.0.1:${address.port}/cloudroom/return`;
-    const timer = setTimeout(() => { if (this.pending?.server === server) { this.cancel(); this.error = "Sign-in expired. Try again."; reportSignInFailed(this.error); } }, pendingLoginTimeoutMs);
-    timer.unref();
-    this.pending = { server, abort, timer, claimed: false };
-    return { url: `${origin.origin}/desktop?${new URLSearchParams({ callback, state, challenge, ...(input.provider ? { provider: input.provider } : {})})}` };
+      const reader = exchanged.body?.getReader();
+      if (!reader) throw new Error("Empty handoff");
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          size += value.length;
+          if (size > 16384) throw new Error("Invalid handoff");
+          chunks.push(value);
+        }
+      } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+      const handoff = handoffSchema.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+      abort.signal.throwIfAborted();
+      await cloudroom(this.deps).configure(handoff.connection ? { ...handoff.connection, projectId: pending.projectId } : null, handoff.account, abort.signal, origin.origin, handoff.sandboxes?.token);
+      linkInstall();
+      return reply(200, "You’re done here. Everything else happens in the Cloudroom app.");
+    } catch (error) {
+      if (pending?.abort.signal.aborted) return reply(400, "Sign-in was cancelled. Start again from Cloudroom.");
+      this.error = error instanceof ApiError ? error.message : "Sign-in could not complete. Start again from Cloudroom.";
+      reportSignInFailed(error instanceof Error ? error.message : String(error));
+      return reply(400, this.error);
+    } finally {
+      if (claimed && pending && this.pending === pending) {
+        clearTimeout(pending.timer);
+        this.pending = null;
+      }
+    }
   }
 }
