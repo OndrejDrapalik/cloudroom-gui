@@ -74,6 +74,7 @@ describe("builtin server artifacts", () => {
     { pluginDir: "environment-git-worktree" },
     { pluginDir: "environment-personal-workspace" },
     { pluginDir: "environment-modal-sandbox" },
+    { pluginDir: "environment-e2b-sandbox" },
   ])(
     "inlines the environment-provider runtime into the $pluginDir server entry",
     async ({ pluginDir }) => {
@@ -96,7 +97,10 @@ describe("builtin server artifacts", () => {
       );
       const built = await buildPluginServer(root, "0.9.0-test", toolchain);
 
-      if (pluginDir === "environment-modal-sandbox") {
+      if (
+        pluginDir === "environment-modal-sandbox" ||
+        pluginDir === "environment-e2b-sandbox"
+      ) {
         await import(
           pathToFileURL(join(root, "scripts/stage-assets.mjs")).href
         );

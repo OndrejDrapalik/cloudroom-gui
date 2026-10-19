@@ -187,6 +187,11 @@ export const OFFICIAL_PLUGINS = [
     defaultEnabled: true,
   },
   {
+    name: "environment-e2b-sandbox",
+    pluginId: "environment-e2b-sandbox",
+    defaultEnabled: true,
+  },
+  {
     name: "github",
     pluginId: "github",
     defaultEnabled: true,

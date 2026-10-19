@@ -258,6 +258,7 @@ describe("builtin plugin reconciliation", () => {
     const optionalNames = OFFICIAL_PLUGINS.map((plugin) => plugin.name);
     expect(optionalNames).toEqual([
       "environment-modal-sandbox",
+      "environment-e2b-sandbox",
       "github",
       "docs",
       "memory",
